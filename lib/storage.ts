@@ -1,102 +1,307 @@
-import { Task } from '../types';
+import { supabase, isSupabaseConfigured } from './supabase';
+import { Task, Category } from '../types';
 
 const STORAGE_KEY = 'planner-hamilton-tasks';
+const CATEGORIES_KEY = 'planner-hamilton-categories';
+let currentUserId: string | null = null;
 
-/**
- * Get all tasks from localStorage
- */
-export function getTasks(): Task[] {
-    try {
-        const data = localStorage.getItem(STORAGE_KEY);
-        return data ? JSON.parse(data) : [];
-    } catch (error) {
-        console.error('Error loading tasks:', error);
-        return [];
+// Set current user ID (called after login)
+export function setCurrentUserId(userId: string) {
+    currentUserId = userId;
+    localStorage.setItem('hamilton-user-id', userId);
+}
+
+// Get current user ID
+export function getCurrentUserId(): string | null {
+    if (currentUserId) return currentUserId;
+    return localStorage.getItem('hamilton-user-id');
+}
+
+// Clear user session
+export function clearUserSession() {
+    currentUserId = null;
+    localStorage.removeItem('hamilton-user-id');
+}
+
+// ==================== TASKS ====================
+
+export async function getTasks(): Promise<Task[]> {
+    const userId = getCurrentUserId();
+    if (!userId) return [];
+
+    if (isSupabaseConfigured()) {
+        // Fetch from Supabase
+        const { data, error } = await supabase
+            .from('tasks')
+            .select('*')
+            .eq('user_id', userId)
+            .order('position', { ascending: true });
+
+        if (error) {
+            console.error('Error fetching tasks:', error);
+            return [];
+        }
+
+        // Convert from database format
+        return (data || []).map(task => ({
+            id: task.id,
+            title: task.title,
+            description: task.description || '',
+            urgency: task.urgency,
+            category: task.category,
+            dayOfWeek: task.day_of_week,
+            scheduledDate: task.scheduled_date,
+            position: task.position,
+            notes: task.notes || '',
+            isCompleted: task.is_completed,
+            completedAt: task.completed_at,
+            deletedAt: task.deleted_at,
+            attachments: task.attachments || [],
+            createdAt: task.created_at,
+            updatedAt: task.updated_at
+        }));
+    } else {
+        // Fallback to localStorage
+        const stored = localStorage.getItem(STORAGE_KEY);
+        return stored ? JSON.parse(stored) : [];
     }
 }
 
-/**
- * Save tasks to localStorage
- */
-export function saveTasks(tasks: Task[]): void {
-    try {
+export async function saveTasks(tasks: Task[]): Promise<void> {
+    const userId = getCurrentUserId();
+    if (!userId) return;
+
+    if (isSupabaseConfigured()) {
+        // Not used directly anymore - we use addTask, updateTask, deleteTask
+        console.warn('saveTasks deprecated when using Supabase');
+    } else {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-    } catch (error) {
-        console.error('Error saving tasks:', error);
     }
 }
 
-/**
- * Add a new task
- */
-export function addTask(task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Task {
-    const tasks = getTasks();
-    const newTask: Task = {
-        ...task,
-        id: crypto.randomUUID(),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-    };
-    tasks.push(newTask);
-    saveTasks(tasks);
-    return newTask;
+export async function addTask(task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<Task> {
+    const userId = getCurrentUserId();
+    if (!userId) throw new Error('No user logged in');
+
+    if (isSupabaseConfigured()) {
+        const { data, error } = await supabase
+            .from('tasks')
+            .insert([{
+                user_id: userId,
+                title: task.title,
+                description: task.description || '',
+                urgency: task.urgency,
+                category: task.category,
+                day_of_week: task.dayOfWeek,
+                scheduled_date: task.scheduledDate,
+                position: task.position,
+                notes: task.notes || '',
+                is_completed: task.isCompleted || false,
+                completed_at: task.completedAt,
+                deleted_at: task.deletedAt,
+                attachments: task.attachments || []
+            }])
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        return {
+            id: data.id,
+            title: data.title,
+            description: data.description,
+            urgency: data.urgency,
+            category: data.category,
+            dayOfWeek: data.day_of_week,
+            scheduledDate: data.scheduled_date,
+            position: data.position,
+            notes: data.notes,
+            isCompleted: data.is_completed,
+            completedAt: data.completed_at,
+            deletedAt: data.deleted_at,
+            attachments: data.attachments,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at
+        };
+    } else {
+        // Fallback to localStorage
+        const newTask: Task = {
+            id: crypto.randomUUID(),
+            ...task,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+        const tasks = await getTasks();
+        tasks.push(newTask);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+        return newTask;
+    }
 }
 
-/**
- * Update an existing task
- */
-export function updateTask(id: string, updates: Partial<Task>): Task | null {
-    const tasks = getTasks();
-    const index = tasks.findIndex((t) => t.id === id);
+export async function updateTask(id: string, updates: Partial<Task>): Promise<Task | null> {
+    const userId = getCurrentUserId();
+    if (!userId) return null;
 
-    if (index === -1) return null;
+    if (isSupabaseConfigured()) {
+        const dbUpdates: any = {};
+        if (updates.title !== undefined) dbUpdates.title = updates.title;
+        if (updates.description !== undefined) dbUpdates.description = updates.description;
+        if (updates.urgency !== undefined) dbUpdates.urgency = updates.urgency;
+        if (updates.category !== undefined) dbUpdates.category = updates.category;
+        if (updates.dayOfWeek !== undefined) dbUpdates.day_of_week = updates.dayOfWeek;
+        if (updates.scheduledDate !== undefined) dbUpdates.scheduled_date = updates.scheduledDate;
+        if (updates.position !== undefined) dbUpdates.position = updates.position;
+        if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
+        if (updates.isCompleted !== undefined) dbUpdates.is_completed = updates.isCompleted;
+        if (updates.completedAt !== undefined) dbUpdates.completed_at = updates.completedAt;
+        if (updates.deletedAt !== undefined) dbUpdates.deleted_at = updates.deletedAt;
+        if (updates.attachments !== undefined) dbUpdates.attachments = updates.attachments;
 
-    const updatedTask = {
-        ...tasks[index],
-        ...updates,
-        id: tasks[index].id, // Preserve ID
-        updatedAt: new Date().toISOString(),
-    };
+        const { data, error } = await supabase
+            .from('tasks')
+            .update(dbUpdates)
+            .eq('id', id)
+            .eq('user_id', userId)
+            .select()
+            .single();
 
-    tasks[index] = updatedTask;
-    saveTasks(tasks);
-    return updatedTask;
+        if (error) {
+            console.error('Error updating task:', error);
+            return null;
+        }
+
+        return data ? {
+            id: data.id,
+            title: data.title,
+            description: data.description,
+            urgency: data.urgency,
+            category: data.category,
+            dayOfWeek: data.day_of_week,
+            scheduledDate: data.scheduled_date,
+            position: data.position,
+            notes: data.notes,
+            isCompleted: data.is_completed,
+            completedAt: data.completed_at,
+            deletedAt: data.deleted_at,
+            attachments: data.attachments,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at
+        } : null;
+    } else {
+        // Fallback to localStorage
+        const tasks = await getTasks();
+        const taskIndex = tasks.findIndex((t) => t.id === id);
+        if (taskIndex === -1) return null;
+
+        tasks[taskIndex] = {
+            ...tasks[taskIndex],
+            ...updates,
+            updatedAt: new Date().toISOString()
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+        return tasks[taskIndex];
+    }
 }
 
-/**
- * Delete a task
- */
-export function deleteTask(id: string): boolean {
-    const tasks = getTasks();
-    const filtered = tasks.filter((t) => t.id !== id);
+export async function deleteTask(id: string): Promise<boolean> {
+    const userId = getCurrentUserId();
+    if (!userId) return false;
 
-    if (filtered.length === tasks.length) return false;
+    if (isSupabaseConfigured()) {
+        const { error } = await supabase
+            .from('tasks')
+            .delete()
+            .eq('id', id)
+            .eq('user_id', userId);
 
-    saveTasks(filtered);
-    return true;
+        return !error;
+    } else {
+        // Fallback to localStorage
+        const tasks = await getTasks();
+        const filtered = tasks.filter((t) => t.id !== id);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+        return true;
+    }
 }
 
-/**
- * Get tasks for a specific column/date
- */
-export function getTasksByColumn(columnId: string): Task[] {
-    return getTasks().filter((task) => task.columnId === columnId);
+// ==================== CATEGORIES ====================
+
+export async function getCategories(): Promise<Category[]> {
+    const userId = getCurrentUserId();
+    if (!userId) return [];
+
+    if (isSupabaseConfigured()) {
+        const { data, error } = await supabase
+            .from('categories')
+            .select('*')
+            .eq('user_id', userId);
+
+        if (error) {
+            console.error('Error fetching categories:', error);
+            return [];
+        }
+
+        return data || [];
+    } else {
+        // Fallback to localStorage
+        const stored = localStorage.getItem(CATEGORIES_KEY);
+        return stored ? JSON.parse(stored) : [];
+    }
 }
 
-/**
- * Get tasks for a date range
- */
-export function getTasksByDateRange(startDate: string, endDate: string): Task[] {
-    const tasks = getTasks();
-    return tasks.filter((task) => {
-        if (task.columnId === 'inbox') return false;
-        return task.columnId >= startDate && task.columnId <= endDate;
-    });
+export async function saveCategories(categories: Category[]): Promise<void> {
+    if (!isSupabaseConfigured()) {
+        localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
+    }
 }
 
-/**
- * Clear all tasks (for testing/reset)
- */
-export function clearAllTasks(): void {
-    localStorage.removeItem(STORAGE_KEY);
+export async function addCategory(category: Omit<Category, 'id'>): Promise<Category> {
+    const userId = getCurrentUserId();
+    if (!userId) throw new Error('No user logged in');
+
+    if (isSupabaseConfigured()) {
+        const { data, error } = await supabase
+            .from('categories')
+            .insert([{
+                user_id: userId,
+                name: category.name,
+                color: category.color
+            }])
+            .select()
+            .single();
+
+        if (error) throw error;
+        return data;
+    } else {
+        // Fallback to localStorage
+        const newCategory: Category = {
+            id: crypto.randomUUID(),
+            ...category
+        };
+        const categories = await getCategories();
+        categories.push(newCategory);
+        localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
+        return newCategory;
+    }
+}
+
+export async function deleteCategory(id: string): Promise<boolean> {
+    const userId = getCurrentUserId();
+    if (!userId) return false;
+
+    if (isSupabaseConfigured()) {
+        const { error } = await supabase
+            .from('categories')
+            .delete()
+            .eq('id', id)
+            .eq('user_id', userId);
+
+        return !error;
+    } else {
+        // Fallback to localStorage
+        const categories = await getCategories();
+        const filtered = categories.filter((c) => c.id !== id);
+        localStorage.setItem(CATEGORIES_KEY, JSON.stringify(filtered));
+        return true;
+    }
 }

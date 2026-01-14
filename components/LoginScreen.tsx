@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { Lock, User } from 'lucide-react';
+import { generateUserId } from '../lib/supabase';
+import { setCurrentUserId } from '../lib/storage';
 
 interface LoginScreenProps {
     onLogin: () => void;
@@ -10,43 +12,63 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
     const [error, setError] = useState('');
     const [isCreatingPin, setIsCreatingPin] = useState(false);
     const [confirmPin, setConfirmPin] = useState('');
+    const [isLoggingIn, setIsLoggingIn] = useState(false);
 
     // Check if PIN exists
     const savedPin = localStorage.getItem('planner-hamilton-pin');
     const needsSetup = !savedPin;
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
+        setIsLoggingIn(true);
 
-        if (needsSetup || isCreatingPin) {
-            // Creating new PIN
-            if (pin.length < 4) {
-                setError('O PIN deve ter pelo menos 4 dígitos');
-                return;
-            }
+        try {
+            if (needsSetup || isCreatingPin) {
+                // Creating new PIN
+                if (pin.length < 4) {
+                    setError('O PIN deve ter pelo menos 4 dígitos');
+                    setIsLoggingIn(false);
+                    return;
+                }
 
-            if (!confirmPin) {
-                setError('Por favor, confirme o PIN');
-                return;
-            }
+                if (!confirmPin) {
+                    setError('Por favor, confirme o PIN');
+                    setIsLoggingIn(false);
+                    return;
+                }
 
-            if (pin !== confirmPin) {
-                setError('Os PINs não coincidem');
-                return;
-            }
+                if (pin !== confirmPin) {
+                    setError('Os PINs não coincidem');
+                    setIsLoggingIn(false);
+                    return;
+                }
 
-            // Save PIN
-            localStorage.setItem('planner-hamilton-pin', pin);
-            onLogin();
-        } else {
-            // Validating existing PIN
-            if (pin === savedPin) {
+                // Generate user ID from PIN
+                const userId = await generateUserId(pin);
+
+                // Save PIN and user ID
+                localStorage.setItem('planner-hamilton-pin', pin);
+                setCurrentUserId(userId);
+
                 onLogin();
             } else {
-                setError('PIN incorreto');
-                setPin('');
+                // Validating existing PIN
+                if (pin === savedPin) {
+                    // Generate user ID from PIN
+                    const userId = await generateUserId(pin);
+                    setCurrentUserId(userId);
+                    onLogin();
+                } else {
+                    setError('PIN incorreto');
+                    setPin('');
+                    setIsLoggingIn(false);
+                }
             }
+        } catch (err) {
+            console.error('Login error:', err);
+            setError('Erro ao fazer login. Tente novamente.');
+            setIsLoggingIn(false);
         }
     };
 
@@ -124,9 +146,17 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                     {/* Submit Button */}
                     <button
                         type="submit"
-                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-lg transition-colors"
+                        disabled={isLoggingIn}
+                        className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium py-3 rounded-lg transition-colors flex items-center justify-center"
                     >
-                        {needsSetup || isCreatingPin ? 'Configurar PIN' : 'Entrar'}
+                        {isLoggingIn ? (
+                            <>
+                                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                                Entrando...
+                            </>
+                        ) : (
+                            needsSetup || isCreatingPin ? 'Configurar PIN' : 'Entrar'
+                        )}
                     </button>
 
                     {/* Reset PIN Option */}
