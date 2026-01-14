@@ -168,9 +168,10 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, categories, onClose, onSave
                 <input
                   type="file"
                   ref={fileInputRef}
+                  onChange={handleFileSelect}
+                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
                   className="hidden"
-                  accept="image/*,.pdf"
-                  onChange={handleFileUpload}
+                  multiple
                 />
               </div>
 
