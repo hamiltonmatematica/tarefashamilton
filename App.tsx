@@ -163,19 +163,19 @@ const App: React.FC = () => {
     await updateTask(id, { isCompleted: false, completedAt: undefined });
   };
 
-  const onDragEnd = (result: DropResult) => {
-    const { destination, source, draggableId } = result;
+  const onDragEnd = async (result: DropResult) => {
+    const { source, destination, draggableId } = result;
 
     if (!destination) return;
-    if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+    if (source.droppableId === destination.droppableId && source.index === destination.index) return;
 
+    // Find the task being moved
     const taskToMove = tasks.find(t => t.id === draggableId);
     if (!taskToMove) return;
 
-    // Create a copy of the task with updated properties
+    // Create updated task with new position/column
     const updatedTask = { ...taskToMove };
 
-    // Update date logic based on droppableId
     if (destination.droppableId === 'inbox') {
       updatedTask.dayOfWeek = 'inbox';
       updatedTask.scheduledDate = undefined;
@@ -209,18 +209,32 @@ const App: React.FC = () => {
 
     // Create the final tasks array
     const finalTasks = tasks.map(t => {
-      if (t.id === draggableId) {
-        return updatedTask;
-      }
-      // Update position if task is in the destination column
+      if (t.id === draggableId) return updatedTask;
       const destTask = destinationTasks.find(dt => dt.id === t.id);
-      if (destTask) {
-        return { ...t, position: destTask.position };
-      }
-      return t;
+      return destTask || t;
     });
 
+    // Update state immediately for UI responsiveness
     setTasks(finalTasks);
+
+    // Persist to Supabase
+    try {
+      // Update the moved task
+      await updateTaskInStorage(updatedTask.id, {
+        dayOfWeek: updatedTask.dayOfWeek,
+        scheduledDate: updatedTask.scheduledDate,
+        position: updatedTask.position
+      });
+
+      // Update positions of all affected tasks in destination column
+      for (const task of destinationTasks) {
+        if (task.id !== updatedTask.id) {
+          await updateTaskInStorage(task.id, { position: task.position });
+        }
+      }
+    } catch (error) {
+      console.error('Error persisting drag-and-drop:', error);
+    }
   };
 
   const filteredTasks = useMemo(() => {
