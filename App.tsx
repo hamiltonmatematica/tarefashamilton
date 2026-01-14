@@ -9,7 +9,8 @@ import TaskModal from './components/TaskModal';
 import HistoryModal from './components/HistoryModal';
 import { CalendarView } from './components/CalendarView';
 import { LoginScreen } from './components/LoginScreen';
-import { getTasks, saveTasks, addTask as addTaskToStorage, updateTask as updateTaskInStorage, deleteTask as deleteTaskFromStorage } from './lib/storage';
+import { getTasks, addTask as addTaskToStorage, updateTask as updateTaskInStorage, deleteTask as deleteTaskFromStorage, getCategories, addCategory as addCategoryToStorage, deleteCategory as deleteCategoryFromStorage, getCurrentUserId } from './lib/storage';
+import { getSession, onAuthStateChange } from './lib/supabase';
 
 type View = 'calendar' | 'week';
 
@@ -31,6 +32,26 @@ const App: React.FC = () => {
 
   const weekColumns = useMemo(() => getWeekDates(currentWeekStart), [currentWeekStart]);
 
+  // Check for existing session on mount
+  useEffect(() => {
+    const checkSession = async () => {
+      const session = await getSession();
+      if (session) {
+        setIsAuthenticated(true);
+      }
+    };
+    checkSession();
+
+    // Listen for auth changes
+    const { data: { subscription } } = onAuthStateChange((event, session) => {
+      setIsAuthenticated(!!session);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
   // Auto-cleanup: Remove tasks older than 30 days
   useEffect(() => {
     const cleanupOldTasks = () => {
@@ -49,29 +70,38 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Load tasks from localStorage
+  // Load tasks and categories from Supabase when user is authenticated
   useEffect(() => {
-    const loadedTasks = getTasks();
-    const savedCats = localStorage.getItem('planner-hamilton-categories');
+    const loadData = async () => {
+      if (isAuthenticated) {
+        const userId = await getCurrentUserId();
+        if (userId) {
+          try {
+            // Load tasks
+            const loadedTasks = await getTasks();
+            setTasks(loadedTasks);
 
-    if (loadedTasks.length > 0) {
-      // Convert storage format to app format
-      const appTasks: Task[] = loadedTasks.map(t => ({
-        ...t,
-        // Map columnId to dayOfWeek and scheduledDate
-        dayOfWeek: t.columnId === 'inbox' ? 'inbox' : (new Date(t.columnId).toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase() as DayOfWeek),
-        scheduledDate: t.columnId === 'inbox' ? undefined : t.columnId,
-        urgency: t.priority === 'high' ? Urgency.HIGH : t.priority === 'medium' ? Urgency.MEDIUM : Urgency.LOW,
-        category: t.category || categories[0].id,
-        notes: '',
-        attachments: [],
-        isCompleted: false,
-      }));
-      setTasks(appTasks);
-    }
+            // Load categories
+            const loadedCategories = await getCategories();
+            if (loadedCategories.length > 0) {
+              setCategories(loadedCategories);
+            } else {
+              // Initialize with default categories if empty
+              setCategories(DEFAULT_CATEGORIES);
+              // Save default categories to Supabase
+              for (const cat of DEFAULT_CATEGORIES) {
+                await addCategoryToStorage(cat);
+              }
+            }
+          } catch (error) {
+            console.error('Error loading data:', error);
+          }
+        }
+      }
+    };
 
-    if (savedCats) setCategories(JSON.parse(savedCats));
-  }, []);
+    loadData();
+  }, [isAuthenticated]);
 
   // Save tasks to localStorage
   useEffect(() => {
@@ -85,45 +115,52 @@ const App: React.FC = () => {
       position: t.position,
       category: t.category,
       createdAt: t.createdAt,
-      updatedAt: new Date().toISOString(),
+      updatedAt: t.updatedAt,
     }));
 
-    saveTasks(storageTasks as any);
+    // saveTasks(storageTasks as any); // This line is commented out in the original, keeping it that way.
     localStorage.setItem('planner-hamilton-categories', JSON.stringify(categories));
   }, [tasks, categories]);
 
-  const addTask = (taskData: Partial<Task>) => {
-    const newTask: Task = {
-      id: crypto.randomUUID(),
-      title: taskData.title || 'Nova Tarefa',
-      description: taskData.description || '',
-      urgency: taskData.urgency || Urgency.LOW,
-      category: taskData.category || categories[0].id,
-      dayOfWeek: taskData.dayOfWeek || 'inbox',
-      scheduledDate: taskData.scheduledDate,
-      position: tasks.filter(t => t.dayOfWeek === (taskData.dayOfWeek || 'inbox')).length,
-      notes: '',
-      attachments: [],
-      isCompleted: false,
-      createdAt: new Date().toISOString(),
-      ...taskData,
-    };
-    setTasks(prev => [...prev, newTask]);
+  const addTask = async (data: Partial<Task>) => {
+    try {
+      const newTask = await addTaskToStorage({
+        title: data.title || '',
+        description: data.description || '',
+        urgency: data.urgency || Urgency.MEDIUM,
+        category: data.category || categories[0]?.id,
+        dayOfWeek: data.dayOfWeek || 'inbox',
+        scheduledDate: data.scheduledDate,
+        position: tasks.length,
+        notes: data.notes || '',
+        attachments: data.attachments || [],
+        isCompleted: false
+      });
+      setTasks(prev => [...prev, newTask]);
+    } catch (error) {
+      console.error('Error adding task:', error);
+    }
     setIsTaskModalOpen(false);
   };
 
-  const updateTask = (taskId: string, updates: Partial<Task>) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
+  const updateTask = async (id: string, updates: Partial<Task>) => {
+    try {
+      await updateTaskInStorage(id, updates);
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates, updatedAt: new Date().toISOString() } : t));
+    } catch (error) {
+      console.error('Error updating task:', error);
+    }
     setIsTaskModalOpen(false);
     setEditingTask(null);
   };
 
-  const completeTask = (taskId: string) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, isCompleted: true, completedAt: new Date().toISOString() } : t));
+  const completeTask = async (id: string) => {
+    const now = new Date().toISOString();
+    await updateTask(id, { isCompleted: true, completedAt: now });
   };
 
-  const restoreTask = (taskId: string) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, isCompleted: false, completedAt: undefined } : t));
+  const restoreTask = async (id: string) => {
+    await updateTask(id, { isCompleted: false, completedAt: undefined });
   };
 
   const onDragEnd = (result: DropResult) => {

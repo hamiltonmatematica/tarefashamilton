@@ -1,12 +1,16 @@
-# Configuração SQL do Supabase
+# Configuração SQL do Supabase - Atualizado com Email Auth
 
-Execute este SQL no Supabase SQL Editor:
+Execute este SQL no Supabase SQL Editor para atualizar o projeto:
 
 ```sql
--- Tabela de tarefas
+-- IMPORTANTE: Primeiro configure no Dashboard do Supabase:
+-- Settings > Authentication > Email Auth > DESABILITAR "Confirm email"
+-- Isso permite login imediato sem verificação de email
+
+-- Tabela de tarefas (já existe, mas garantindo estrutura)
 create table if not exists tasks (
   id uuid primary key default uuid_generate_v4(),
-  user_id text not null,
+  user_id uuid not null references auth.users(id) on delete cascade,
   title text not null,
   description text default '',
   urgency text not null,
@@ -26,7 +30,7 @@ create table if not exists tasks (
 -- Tabela de categorias
 create table if not exists categories (
   id uuid primary key default uuid_generate_v4(),
-  user_id text not null,
+  user_id uuid not null references auth.users(id) on delete cascade,
   name text not null,
   color text not null,
   created_at timestamptz default now()
@@ -42,47 +46,47 @@ create index if not exists categories_user_id_idx on categories(user_id);
 alter table tasks enable row level security;
 alter table categories enable row level security;
 
--- Políticas para tasks
+-- Políticas para tasks - apenas o dono pode acessar
 drop policy if exists "Users can view own tasks" on tasks;
 create policy "Users can view own tasks"
   on tasks for select
-  using (true); -- Simplificado: permite acesso público, filtraremos no código
+  using (auth.uid() = user_id);
 
 drop policy if exists "Users can insert own tasks" on tasks;
 create policy "Users can insert own tasks"
   on tasks for insert
-  with check (true);
+  with check (auth.uid() = user_id);
 
 drop policy if exists "Users can update own tasks" on tasks;
 create policy "Users can update own tasks"
   on tasks for update
-  using (true);
+  using (auth.uid() = user_id);
 
 drop policy if exists "Users can delete own tasks" on tasks;
 create policy "Users can delete own tasks"
   on tasks for delete
-  using (true);
+  using (auth.uid() = user_id);
 
--- Políticas para categories
+-- Políticas para categories - apenas o dono pode acessar
 drop policy if exists "Users can view own categories" on categories;
 create policy "Users can view own categories"
   on categories for select
-  using (true);
+  using (auth.uid() = user_id);
 
 drop policy if exists "Users can insert own categories" on categories;
 create policy "Users can insert own categories"
   on categories for insert
-  with check (true);
+  with check (auth.uid() = user_id);
 
 drop policy if exists "Users can update own categories" on categories;
 create policy "Users can update own categories"
   on categories for update
-  using (true);
+  using (auth.uid() = user_id);
 
 drop policy if exists "Users can delete own categories" on categories;
 create policy "Users can delete own categories"
   on categories for delete
-  using (true);
+  using (auth.uid() = user_id);
 
 -- Função para atualizar updated_at automaticamente
 create or replace function update_updated_at_column()
@@ -101,8 +105,11 @@ create trigger update_tasks_updated_at
   execute function update_updated_at_column();
 ```
 
-## Após executar o SQL:
+## ⚙️ Configuração no Dashboard Supabase
 
-1. Copie a URL do projeto (Settings > API > Project URL)
-2. Copie a `anon` key (Settings > API > Project API keys > anon public)
-3. Cole no arquivo `.env.local`
+**IMPORTANTE:** Vá em **Settings → Authentication → Email** e:
+1. ✅ Ative **Enable Email Provider**
+2. ❌ **DESABILITE** "Confirm email" (permite login sem verificar email)
+3. ❌ **DESABILITE** "Secure email change" (opcional)
+
+Isso permite que usuários façam login imediatamente após cadastro!

@@ -1,40 +1,23 @@
-import { supabase, isSupabaseConfigured } from './supabase';
+import { supabase, isSupabaseConfigured, getCurrentUser } from './supabase';
 import { Task, Category } from '../types';
 
 const STORAGE_KEY = 'planner-hamilton-tasks';
 const CATEGORIES_KEY = 'planner-hamilton-categories';
-let currentUserId: string | null = null;
 
-// Set current user ID (called after login)
-export function setCurrentUserId(userId: string) {
-    currentUserId = userId;
-    localStorage.setItem('hamilton-user-id', userId);
-}
-
-// Get current user ID
-export function getCurrentUserId(): string | null {
-    if (currentUserId) return currentUserId;
-    return localStorage.getItem('hamilton-user-id');
-}
-
-// Clear user session
-export function clearUserSession() {
-    currentUserId = null;
-    localStorage.removeItem('hamilton-user-id');
+// Get current user ID from Supabase Auth
+export async function getCurrentUserId(): Promise<string | null> {
+    const user = await getCurrentUser();
+    return user?.id || null;
 }
 
 // ==================== TASKS ====================
 
 export async function getTasks(): Promise<Task[]> {
-    const userId = getCurrentUserId();
-    if (!userId) return [];
-
     if (isSupabaseConfigured()) {
         // Fetch from Supabase
         const { data, error } = await supabase
             .from('tasks')
             .select('*')
-            .eq('user_id', userId)
             .order('position', { ascending: true });
 
         if (error) {
@@ -67,27 +50,15 @@ export async function getTasks(): Promise<Task[]> {
     }
 }
 
-export async function saveTasks(tasks: Task[]): Promise<void> {
-    const userId = getCurrentUserId();
-    if (!userId) return;
-
-    if (isSupabaseConfigured()) {
-        // Not used directly anymore - we use addTask, updateTask, deleteTask
-        console.warn('saveTasks deprecated when using Supabase');
-    } else {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
-    }
-}
-
 export async function addTask(task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<Task> {
-    const userId = getCurrentUserId();
-    if (!userId) throw new Error('No user logged in');
-
     if (isSupabaseConfigured()) {
+        const user = await getCurrentUser();
+        if (!user) throw new Error('No user logged in');
+
         const { data, error } = await supabase
             .from('tasks')
             .insert([{
-                user_id: userId,
+                user_id: user.id,
                 title: task.title,
                 description: task.description || '',
                 urgency: task.urgency,
@@ -139,9 +110,6 @@ export async function addTask(task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>
 }
 
 export async function updateTask(id: string, updates: Partial<Task>): Promise<Task | null> {
-    const userId = getCurrentUserId();
-    if (!userId) return null;
-
     if (isSupabaseConfigured()) {
         const dbUpdates: any = {};
         if (updates.title !== undefined) dbUpdates.title = updates.title;
@@ -161,7 +129,6 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<Ta
             .from('tasks')
             .update(dbUpdates)
             .eq('id', id)
-            .eq('user_id', userId)
             .select()
             .single();
 
@@ -204,15 +171,11 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<Ta
 }
 
 export async function deleteTask(id: string): Promise<boolean> {
-    const userId = getCurrentUserId();
-    if (!userId) return false;
-
     if (isSupabaseConfigured()) {
         const { error } = await supabase
             .from('tasks')
             .delete()
-            .eq('id', id)
-            .eq('user_id', userId);
+            .eq('id', id);
 
         return !error;
     } else {
@@ -227,14 +190,10 @@ export async function deleteTask(id: string): Promise<boolean> {
 // ==================== CATEGORIES ====================
 
 export async function getCategories(): Promise<Category[]> {
-    const userId = getCurrentUserId();
-    if (!userId) return [];
-
     if (isSupabaseConfigured()) {
         const { data, error } = await supabase
             .from('categories')
-            .select('*')
-            .eq('user_id', userId);
+            .select('*');
 
         if (error) {
             console.error('Error fetching categories:', error);
@@ -249,21 +208,15 @@ export async function getCategories(): Promise<Category[]> {
     }
 }
 
-export async function saveCategories(categories: Category[]): Promise<void> {
-    if (!isSupabaseConfigured()) {
-        localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
-    }
-}
-
 export async function addCategory(category: Omit<Category, 'id'>): Promise<Category> {
-    const userId = getCurrentUserId();
-    if (!userId) throw new Error('No user logged in');
-
     if (isSupabaseConfigured()) {
+        const user = await getCurrentUser();
+        if (!user) throw new Error('No user logged in');
+
         const { data, error } = await supabase
             .from('categories')
             .insert([{
-                user_id: userId,
+                user_id: user.id,
                 name: category.name,
                 color: category.color
             }])
@@ -286,22 +239,18 @@ export async function addCategory(category: Omit<Category, 'id'>): Promise<Categ
 }
 
 export async function deleteCategory(id: string): Promise<boolean> {
-    const userId = getCurrentUserId();
-    if (!userId) return false;
-
     if (isSupabaseConfigured()) {
         const { error } = await supabase
             .from('categories')
             .delete()
-            .eq('id', id)
-            .eq('user_id', userId);
+            .eq('id', id);
 
         return !error;
     } else {
         // Fallback to localStorage
         const categories = await getCategories();
         const filtered = categories.filter((c) => c.id !== id);
-        localStorage.setItem(CATEGORIES_KEY, JSON.stringify(filtered));
+        localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
         return true;
     }
 }

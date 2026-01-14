@@ -1,82 +1,57 @@
 import React, { useState } from 'react';
-import { Lock, User } from 'lucide-react';
-import { generateUserId } from '../lib/supabase';
-import { setCurrentUserId } from '../lib/storage';
+import { Lock, User, Mail } from 'lucide-react';
+import { signUp, signIn } from '../lib/supabase';
 
 interface LoginScreenProps {
     onLogin: () => void;
 }
 
 export function LoginScreen({ onLogin }: LoginScreenProps) {
-    const [pin, setPin] = useState('');
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
     const [error, setError] = useState('');
-    const [isCreatingPin, setIsCreatingPin] = useState(false);
-    const [confirmPin, setConfirmPin] = useState('');
-    const [isLoggingIn, setIsLoggingIn] = useState(false);
-
-    // Check if PIN exists
-    const savedPin = localStorage.getItem('planner-hamilton-pin');
-    const needsSetup = !savedPin;
+    const [isLoading, setIsLoading] = useState(false);
+    const [isSignUp, setIsSignUp] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
-        setIsLoggingIn(true);
+        setIsLoading(true);
 
         try {
-            if (needsSetup || isCreatingPin) {
-                // Creating new PIN
-                if (pin.length < 4) {
-                    setError('O PIN deve ter pelo menos 4 dígitos');
-                    setIsLoggingIn(false);
+            if (isSignUp) {
+                // Sign up mode
+                if (password.length < 6) {
+                    setError('A senha deve ter pelo menos 6 caracteres');
+                    setIsLoading(false);
                     return;
                 }
 
-                if (!confirmPin) {
-                    setError('Por favor, confirme o PIN');
-                    setIsLoggingIn(false);
+                if (password !== confirmPassword) {
+                    setError('As senhas não coincidem');
+                    setIsLoading(false);
                     return;
                 }
 
-                if (pin !== confirmPin) {
-                    setError('Os PINs não coincidem');
-                    setIsLoggingIn(false);
-                    return;
-                }
-
-                // Generate user ID from PIN
-                const userId = await generateUserId(pin);
-
-                // Save PIN and user ID
-                localStorage.setItem('planner-hamilton-pin', pin);
-                setCurrentUserId(userId);
-
+                await signUp(email, password);
                 onLogin();
             } else {
-                // Validating existing PIN
-                if (pin === savedPin) {
-                    // Generate user ID from PIN
-                    const userId = await generateUserId(pin);
-                    setCurrentUserId(userId);
-                    onLogin();
-                } else {
-                    setError('PIN incorreto');
-                    setPin('');
-                    setIsLoggingIn(false);
-                }
+                // Sign in mode
+                await signIn(email, password);
+                onLogin();
             }
-        } catch (err) {
-            console.error('Login error:', err);
-            setError('Erro ao fazer login. Tente novamente.');
-            setIsLoggingIn(false);
+        } catch (err: any) {
+            console.error('Auth error:', err);
+            if (err.message?.includes('Invalid login credentials')) {
+                setError('Email ou senha incorretos');
+            } else if (err.message?.includes('User already registered')) {
+                setError('Este email já está cadastrado. Faça login.');
+            } else {
+                setError(err.message || 'Erro ao fazer login. Tente novamente.');
+            }
+            setIsLoading(false);
         }
-    };
-
-    const handleResetPin = () => {
-        setIsCreatingPin(true);
-        setPin('');
-        setConfirmPin('');
-        setError('');
     };
 
     return (
@@ -89,48 +64,66 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                     </div>
                     <h1 className="text-3xl font-bold text-slate-900">Hamilton Planner</h1>
                     <p className="text-slate-500 text-sm mt-2">
-                        {needsSetup || isCreatingPin ? 'Configure seu PIN de acesso' : 'Bem-vindo de volta'}
+                        {isSignUp ? 'Crie sua conta' : 'Bem-vindo de volta'}
                     </p>
                 </div>
 
                 {/* Form */}
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* PIN Input */}
+                    {/* Email Input */}
                     <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">
-                            {needsSetup || isCreatingPin ? 'Criar PIN' : 'PIN de Acesso'}
+                            Email
                         </label>
                         <div className="relative">
-                            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                             <input
-                                type="password"
-                                inputMode="numeric"
-                                maxLength={6}
-                                value={pin}
-                                onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-                                className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-center text-2xl tracking-widest"
-                                placeholder="••••"
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                placeholder="seu@email.com"
+                                required
                                 autoFocus
                             />
                         </div>
                     </div>
 
-                    {/* Confirm PIN (only when creating) */}
-                    {(needsSetup || isCreatingPin) && pin.length >= 4 && (
+                    {/* Password Input */}
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">
+                            Senha
+                        </label>
+                        <div className="relative">
+                            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                            <input
+                                type="password"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                placeholder="••••••••"
+                                required
+                                minLength={6}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Confirm Password (only in sign up mode) */}
+                    {isSignUp && (
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-2">
-                                Confirmar PIN
+                                Confirmar Senha
                             </label>
                             <div className="relative">
                                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                                 <input
                                     type="password"
-                                    inputMode="numeric"
-                                    maxLength={6}
-                                    value={confirmPin}
-                                    onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ''))}
-                                    className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-center text-2xl tracking-widest"
-                                    placeholder="••••"
+                                    value={confirmPassword}
+                                    onChange={(e) => setConfirmPassword(e.target.value)}
+                                    className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                    placeholder="••••••••"
+                                    required={isSignUp}
+                                    minLength={6}
                                 />
                             </div>
                         </div>
@@ -146,37 +139,41 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
                     {/* Submit Button */}
                     <button
                         type="submit"
-                        disabled={isLoggingIn}
+                        disabled={isLoading}
                         className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium py-3 rounded-lg transition-colors flex items-center justify-center"
                     >
-                        {isLoggingIn ? (
+                        {isLoading ? (
                             <>
                                 <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                                Entrando...
+                                {isSignUp ? 'Criando...' : 'Entrando...'}
                             </>
                         ) : (
-                            needsSetup || isCreatingPin ? 'Configurar PIN' : 'Entrar'
+                            isSignUp ? 'Criar Conta' : 'Entrar'
                         )}
                     </button>
 
-                    {/* Reset PIN Option */}
-                    {!needsSetup && !isCreatingPin && (
+                    {/* Toggle Sign Up / Sign In */}
+                    <div className="text-center">
                         <button
                             type="button"
-                            onClick={handleResetPin}
-                            className="w-full text-sm text-slate-500 hover:text-slate-700 py-2"
+                            onClick={() => {
+                                setIsSignUp(!isSignUp);
+                                setError('');
+                                setConfirmPassword('');
+                            }}
+                            className="text-sm text-blue-600 hover:text-blue-700 font-medium"
                         >
-                            Esqueci meu PIN
+                            {isSignUp ? 'Já tem conta? Faça login' : 'Não tem conta? Cadastre-se'}
                         </button>
-                    )}
+                    </div>
                 </form>
 
                 {/* Instructions */}
-                {needsSetup && (
+                {isSignUp && (
                     <div className="mt-6 p-4 bg-blue-50 rounded-lg">
                         <p className="text-xs text-blue-800">
-                            💡 <strong>Dica:</strong> Escolha um PIN de 4-6 dígitos que seja fácil de lembrar.
-                            Você precisará dele sempre que abrir o planner.
+                            💡 <strong>Dica:</strong> Use um email válido e uma senha de pelo menos 6 caracteres.
+                            Você poderá fazer login imediatamente após o cadastro!
                         </p>
                     </div>
                 )}
