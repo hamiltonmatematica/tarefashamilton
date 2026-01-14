@@ -1,0 +1,7 @@
+{
+  "name": "Planner Semanal Áurea",
+  "description": "Um sistema moderno de organização de tarefas com visão semanal, drag-and-drop, categorias personalizadas e gestão de prioridades.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
