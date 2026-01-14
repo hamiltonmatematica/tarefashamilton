@@ -386,7 +386,23 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center space-x-3 ml-4">
+          <div className="flex items-center gap-3 ml-4">
+            {/* Logout Button */}
+            <button
+              onClick={async () => {
+                if (confirm('Deseja sair?')) {
+                  const { signOut } = await import('./lib/supabase');
+                  await signOut();
+                  setIsAuthenticated(false);
+                  setTasks([]);
+                  setCategories(DEFAULT_CATEGORIES);
+                }
+              }}
+              className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+            >
+              Sair
+            </button>
+
             <button
               onClick={() => { setEditingTask(null); setIsTaskModalOpen(true); }}
               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center shadow-sm transition-colors"
