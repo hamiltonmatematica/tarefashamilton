@@ -112,9 +112,9 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, categories, onClose, onSave
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
 
-        <div className="relative bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex overflow-hidden">
+        <div className="relative bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col md:flex-row overflow-hidden">
           {/* Left: Main Content */}
-          <div className="flex-1 overflow-y-auto p-8 border-r">
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 border-b md:border-b-0 md:border-r">
             {/* Mode Toggle */}
             <div className="flex items-center justify-between mb-6">
               <div className="flex bg-slate-100 p-1 rounded-lg">
@@ -214,7 +214,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, categories, onClose, onSave
           </div>
 
           {/* Right: Metadata */}
-          <div className="w-80 bg-slate-50 overflow-y-auto flex flex-col p-8">
+          <div className="w-full md:w-80 bg-slate-50 overflow-y-auto flex flex-col p-4 md:p-8">
             <div className="flex items-center justify-between mb-8">
               <span className="text-sm font-bold text-slate-800">Detalhes</span>
               <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-lg text-slate-400">

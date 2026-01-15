@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
-import { Search, Plus, ChevronLeft, ChevronRight, Calendar as CalendarIcon, ArrowLeft } from 'lucide-react';
+import { Search, Plus, ChevronLeft, ChevronRight, Calendar as CalendarIcon, ArrowLeft, Menu, LayoutDashboard } from 'lucide-react';
 import { Task, Category, Urgency, DayOfWeek } from './types';
 import { DEFAULT_CATEGORIES, getStartOfWeek, getWeekDates, formatDate } from './constants';
 import KanbanBoard from './components/KanbanBoard';
@@ -77,22 +77,74 @@ const App: React.FC = () => {
         const userId = await getCurrentUserId();
         if (userId) {
           try {
-            // Load tasks
-            const loadedTasks = await getTasks();
-            setTasks(loadedTasks);
+            // Load categories first to have the correct UUIDs
+            let loadedCategories = await getCategories();
 
-            // Load categories
-            const loadedCategories = await getCategories();
-            if (loadedCategories.length > 0) {
-              setCategories(loadedCategories);
-            } else {
+            if (loadedCategories.length === 0) {
               // Initialize with default categories if empty
+              loadedCategories = DEFAULT_CATEGORIES;
               setCategories(DEFAULT_CATEGORIES);
               // Save default categories to Supabase
               for (const cat of DEFAULT_CATEGORIES) {
+                // When we save, we need to capture the returned category with the real UUID
+                // But addCategoryToStorage returns the saved category, so we can use that if we were doing it one by one
+                // For now, let's just save them. The next reload will get the correct UUIDs.
+                // Or better: update local state with the saved ones.
                 await addCategoryToStorage(cat);
               }
+              // Reload to get the UUIDs
+              loadedCategories = await getCategories();
             }
+
+            setCategories(loadedCategories);
+
+            // Load tasks
+            const loadedTasks = await getTasks();
+
+            // Fix legacy category IDs if needed
+            let tasksToSet = loadedTasks;
+            let checksNeeded = false;
+
+            const legacyIds = ['1', '2', '3', '4'];
+            const tasksWithLegacyIds = loadedTasks.filter(t => legacyIds.includes(t.category));
+
+            if (tasksWithLegacyIds.length > 0) {
+              console.log('Found tasks with legacy category IDs. Fixing...', tasksWithLegacyIds.length);
+
+              const updates = tasksWithLegacyIds.map(async (task) => {
+                // Find the correct category UUID based on the legacy ID/Name mapping
+                // '1' -> Pessoal, '2' -> Áurea, etc.
+                const legacyMap: Record<string, string> = {
+                  '1': 'Pessoal',
+                  '2': 'Áurea',
+                  '3': 'Tráfego Pago',
+                  '4': 'Consultoria IA'
+                };
+
+                const targetName = legacyMap[task.category];
+                if (targetName) {
+                  const correctCategory = loadedCategories.find(c => c.name === targetName);
+                  if (correctCategory) {
+                    // Update in Supabase
+                    await updateTaskInStorage(task.id, { category: correctCategory.id });
+                    // Return updated task for local state
+                    return { ...task, category: correctCategory.id };
+                  }
+                }
+                return task;
+              });
+
+              const updatedTasksWithLegacy = await Promise.all(updates);
+
+              // Merge updated tasks back into the main list
+              tasksToSet = loadedTasks.map(t => {
+                const updated = updatedTasksWithLegacy.find(ut => ut.id === t.id);
+                return updated || t;
+              });
+            }
+
+            setTasks(tasksToSet);
+
           } catch (error) {
             console.error('Error loading data:', error);
           }
@@ -291,34 +343,45 @@ const App: React.FC = () => {
     updatedAt: new Date().toISOString(),
   }));
 
+  // Handle screen resize for sidebar
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 1024) {
+        setIsSidebarOpen(false);
+      } else {
+        setIsSidebarOpen(true);
+      }
+    };
+
+    // Set initial state
+    handleResize();
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   // Show login screen if not authenticated
   if (!isAuthenticated) {
     return <LoginScreen onLogin={() => setIsAuthenticated(true)} />;
   }
 
-  // Render Calendar View
-  if (view === 'calendar') {
-    return (
-      <>
-        <CalendarView tasks={calendarTasks as any} onDayClick={handleDayClick} />
-
-        {isTaskModalOpen && (
-          <TaskModal
-            task={editingTask}
-            categories={categories}
-            onClose={() => { setIsTaskModalOpen(false); setEditingTask(null); }}
-            onSave={(data) => editingTask ? updateTask(editingTask.id, data) : addTask(data)}
-            onDelete={(id) => setTasks(prev => prev.filter(t => t.id !== id))}
-          />
-        )}
-      </>
-    );
-  }
-
-  // Render Week View
   return (
-    <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden">
+    <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden relative">
+      {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-20 lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar - Fixed on mobile/tablet, Static on desktop */}
+      <div className={`
+        fixed lg:static inset-y-0 left-0 z-30 
+        transform transition-transform duration-300 ease-in-out
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0 lg:w-0 lg:overflow-hidden'}
+        ${isSidebarOpen && 'lg:w-64'} 
+      `}>
         <Sidebar
           categories={categories}
           selectedUrgency={selectedUrgency}
@@ -328,33 +391,56 @@ const App: React.FC = () => {
           addCategory={addCategory}
           deleteCategory={deleteCategory}
           onOpenHistory={() => setIsHistoryOpen(true)}
+          onClose={() => setIsSidebarOpen(false)}
         />
-      )}
+      </div>
 
-      <main className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 border-b bg-white flex items-center justify-between px-6 flex-shrink-0">
-          <div className="flex items-center space-x-6 flex-1">
-            {/* Sidebar Toggle */}
-            <button
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors"
-              title={isSidebarOpen ? 'Ocultar barra lateral' : 'Mostrar barra lateral'}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
+      <main className="flex-1 flex flex-col min-w-0 w-full relative">
+        <header className="border-b bg-white flex flex-col md:flex-row md:items-center justify-between px-4 py-3 md:px-6 md:h-16 gap-4 flex-shrink-0 z-10">
+          <div className="flex flex-col md:flex-row md:items-center gap-4 flex-1">
+            <div className="flex items-center justify-between w-full md:w-auto">
+              <div className="flex items-center gap-2">
+                {/* Sidebar Toggle */}
+                <button
+                  onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                  className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors md:hidden"
+                  title="Menu"
+                >
+                  <Menu className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                  className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors hidden md:block"
+                  title={isSidebarOpen ? 'Ocultar barra lateral' : 'Mostrar barra lateral'}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
+                </button>
+              </div>
 
-            {/* Back to Calendar Button */}
-            <button
-              onClick={() => setView('calendar')}
-              className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Calendário
-            </button>
+              {/* View Toggle on Mobile */}
+              <div className="flex md:hidden items-center bg-slate-100 p-1 rounded-lg">
+                <button
+                  onClick={() => changeWeek(-1)}
+                  className="p-1.5 hover:bg-white hover:shadow-sm rounded transition-all"
+                >
+                  <ChevronLeft className="w-4 h-4 text-slate-600" />
+                </button>
+                <span className="text-xs font-bold text-slate-600 px-2 min-w-[80px] text-center">
+                  {currentWeekStart.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}
+                </span>
+                <button
+                  onClick={() => changeWeek(1)}
+                  className="p-1.5 hover:bg-white hover:shadow-sm rounded transition-all"
+                >
+                  <ChevronRight className="w-4 h-4 text-slate-600" />
+                </button>
+              </div>
+            </div>
 
-            <div className="relative max-w-md w-full">
+            {/* Search Bar - Full width on mobile */}
+            <div className="relative w-full md:max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
               <input
                 type="text"
@@ -365,8 +451,8 @@ const App: React.FC = () => {
               />
             </div>
 
-            {/* Week Navigation */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-lg">
+            {/* Week Navigation - Desktop */}
+            <div className="hidden md:flex items-center bg-slate-100 p-1 rounded-lg">
               <button onClick={() => changeWeek(-1)} className="p-1 hover:bg-white hover:shadow-sm rounded transition-all">
                 <ChevronLeft className="w-4 h-4 text-slate-600" />
               </button>
@@ -386,7 +472,26 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 ml-4">
+          <div className="flex items-center gap-2 md:gap-3 md:ml-4 justify-end">
+            {view === 'calendar' ? (
+              <button
+                onClick={() => setView('week')}
+                className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap"
+              >
+                <LayoutDashboard className="w-4 h-4" />
+                <span className="hidden sm:inline">Kanban</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setView('calendar')}
+                className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap"
+              >
+                <CalendarIcon className="w-4 h-4" />
+                <span className="hidden sm:inline">Calendário</span>
+              </button>
+            )}
+
+
             {/* Logout Button */}
             <button
               onClick={async () => {
@@ -398,31 +503,36 @@ const App: React.FC = () => {
                   setCategories(DEFAULT_CATEGORIES);
                 }
               }}
-              className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors whitespace-nowrap"
             >
               Sair
             </button>
 
             <button
               onClick={() => { setEditingTask(null); setIsTaskModalOpen(true); }}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center shadow-sm transition-colors"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 md:px-4 rounded-lg text-sm font-medium flex items-center shadow-sm transition-colors whitespace-nowrap"
             >
-              <Plus className="w-4 h-4 mr-2" />
-              Nova Tarefa
+              <Plus className="w-4 h-4 md:mr-2" />
+              <span className="hidden md:inline">Nova Tarefa</span>
+              <span className="md:hidden">Nova</span>
             </button>
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-6">
-          <DragDropContext onDragEnd={onDragEnd}>
-            <KanbanBoard
-              tasks={filteredTasks}
-              categories={categories}
-              weekColumns={weekColumns}
-              onTaskClick={(task) => { setEditingTask(task); setIsTaskModalOpen(true); }}
-              onCompleteTask={completeTask}
-            />
-          </DragDropContext>
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6">
+          {view === 'calendar' ? (
+            <CalendarView tasks={calendarTasks as any} onDayClick={handleDayClick} />
+          ) : (
+            <DragDropContext onDragEnd={onDragEnd}>
+              <KanbanBoard
+                tasks={filteredTasks}
+                categories={categories}
+                weekColumns={weekColumns}
+                onTaskClick={(task) => { setEditingTask(task); setIsTaskModalOpen(true); }}
+                onCompleteTask={completeTask}
+              />
+            </DragDropContext>
+          )}
         </div>
       </main>
 

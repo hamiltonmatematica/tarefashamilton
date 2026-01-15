@@ -13,6 +13,7 @@ interface SidebarProps {
   addCategory: (name: string, color: string) => void;
   deleteCategory: (id: string) => void;
   onOpenHistory: () => void;
+  onClose?: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -23,7 +24,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   setSelectedCategory,
   addCategory,
   deleteCategory,
-  onOpenHistory
+  onOpenHistory,
+  onClose
 }) => {
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCatName, setNewCatName] = useState('');
@@ -38,13 +40,23 @@ const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <aside className="w-64 bg-white border-r flex flex-col flex-shrink-0 overflow-y-auto">
+    <aside className="w-64 bg-white border-r flex flex-col flex-shrink-0 overflow-y-auto h-full relative">
       <div className="p-6">
-        <div className="flex items-center space-x-2 mb-8">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-            <LayoutDashboard className="text-white w-5 h-5" />
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center space-x-2">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+              <LayoutDashboard className="text-white w-5 h-5" />
+            </div>
+            <span className="text-xl font-bold tracking-tight text-slate-800">Hamilton Planner</span>
           </div>
-          <span className="text-xl font-bold tracking-tight text-slate-800">Hamilton Planner</span>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="lg:hidden p-1 hover:bg-slate-100 rounded text-slate-500"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         <nav className="space-y-6">
@@ -53,14 +65,14 @@ const Sidebar: React.FC<SidebarProps> = ({
             <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 ml-2">Visão</h3>
             <div className="space-y-1">
               <button
-                onClick={() => { setSelectedUrgency(null); setSelectedCategory(null); }}
+                onClick={() => { setSelectedUrgency(null); setSelectedCategory(null); onClose?.(); }}
                 className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${!selectedUrgency && !selectedCategory ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50'}`}
               >
                 <CheckSquare className="w-4 h-4 mr-3" />
                 Todas as tarefas
               </button>
               <button
-                onClick={onOpenHistory}
+                onClick={() => { onOpenHistory(); onClose?.(); }}
                 className="w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg text-slate-600 hover:bg-slate-50 transition-colors"
               >
                 <History className="w-4 h-4 mr-3" />
@@ -76,7 +88,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               {Object.entries(URGENCY_CONFIG).map(([key, config]) => (
                 <button
                   key={key}
-                  onClick={() => setSelectedUrgency(selectedUrgency === key ? null : key as Urgency)}
+                  onClick={() => { setSelectedUrgency(selectedUrgency === key ? null : key as Urgency); onClose?.(); }}
                   className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${selectedUrgency === key ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
                 >
                   <div className={`w-2 h-2 rounded-full ${config.color} mr-3`} />
@@ -99,7 +111,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               {categories.map((cat) => (
                 <div key={cat.id} className="group relative">
                   <button
-                    onClick={() => setSelectedCategory(selectedCategory === cat.id ? null : cat.id)}
+                    onClick={() => { setSelectedCategory(selectedCategory === cat.id ? null : cat.id); onClose?.(); }}
                     className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${selectedCategory === cat.id ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
                   >
                     <Circle className="w-3 h-3 mr-3" fill={cat.color} stroke={cat.color} />

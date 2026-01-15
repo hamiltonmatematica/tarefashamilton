@@ -1,9 +1,19 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { Task } from '../types';
+
+interface CalendarTask {
+    id: string;
+    title: string;
+    description: string;
+    priority: 'low' | 'medium' | 'high';
+    columnId: string;
+    position: number;
+    createdAt: string;
+    updatedAt: string;
+}
 
 interface CalendarViewProps {
-    tasks: Task[];
+    tasks: CalendarTask[];
     onDayClick: (date: Date) => void;
 }
 
@@ -18,6 +28,8 @@ const PRIORITY_COLORS = {
     low: 'bg-blue-500',
     medium: 'bg-yellow-500',
     high: 'bg-red-500',
+    // Fallback for unexpected priority
+    undefined: 'bg-slate-400'
 };
 
 export function CalendarView({ tasks, onDayClick }: CalendarViewProps) {
@@ -56,7 +68,7 @@ export function CalendarView({ tasks, onDayClick }: CalendarViewProps) {
     }
 
     // Get tasks for a specific date
-    const getTasksForDate = (date: Date): Task[] => {
+    const getTasksForDate = (date: Date): CalendarTask[] => {
         const dateStr = formatDate(date);
         return tasks.filter(task => task.columnId === dateStr);
     };
@@ -129,8 +141,8 @@ export function CalendarView({ tasks, onDayClick }: CalendarViewProps) {
             {/* Calendar Grid */}
             <div className="flex-1 p-6 overflow-auto">
                 <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                    {/* Days of week header */}
-                    <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">
+                    {/* Days of week header - Hidden on mobile, shown on md+ */}
+                    <div className="hidden md:grid grid-cols-7 border-b border-slate-200 bg-slate-50">
                         {DAYS_OF_WEEK.map((day) => (
                             <div
                                 key={day}
@@ -142,7 +154,7 @@ export function CalendarView({ tasks, onDayClick }: CalendarViewProps) {
                     </div>
 
                     {/* Calendar days */}
-                    <div className="grid grid-cols-7">
+                    <div className="grid grid-cols-1 md:grid-cols-7">
                         {calendarDays.map((date, index) => {
                             if (!date) return null;
 
@@ -155,23 +167,29 @@ export function CalendarView({ tasks, onDayClick }: CalendarViewProps) {
                                     key={index}
                                     onClick={() => onDayClick(date)}
                                     className={`
-                    min-h-[120px] p-2 border-b border-r border-slate-200
+                    min-h-[100px] md:min-h-[120px] p-2 border-b border-r border-slate-200
                     hover:bg-slate-50 cursor-pointer transition-colors
                     ${!isInCurrentMonth ? 'bg-slate-50/50' : 'bg-white'}
                     ${isTodayDate ? 'ring-2 ring-blue-500 ring-inset' : ''}
                   `}
                                 >
-                                    {/* Day number */}
+                                    {/* Day number and Name */}
                                     <div className="flex justify-between items-start mb-1">
-                                        <span
-                                            className={`
-                        text-sm font-medium
-                        ${!isInCurrentMonth ? 'text-slate-400' : 'text-slate-700'}
-                        ${isTodayDate ? 'bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs' : ''}
-                      `}
-                                        >
-                                            {date.getDate()}
-                                        </span>
+                                        <div className="flex items-center gap-2">
+                                            <span
+                                                className={`
+                            text-sm font-medium
+                            ${!isInCurrentMonth ? 'text-slate-400' : 'text-slate-700'}
+                            ${isTodayDate ? 'bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs' : ''}
+                          `}
+                                            >
+                                                {date.getDate()}
+                                            </span>
+                                            {/* Show Day Name on Mobile */}
+                                            <span className="md:hidden text-xs font-semibold text-slate-500">
+                                                {DAYS_OF_WEEK[date.getDay()]}
+                                            </span>
+                                        </div>
 
                                         {dayTasks.length > 0 && (
                                             <span className="text-xs font-medium text-slate-500">
