@@ -1,8 +1,9 @@
 import { supabase, isSupabaseConfigured, getCurrentUser } from './supabase';
-import { Task, Category } from '../types';
+import { Task, Category, Project } from '../types';
 
 const STORAGE_KEY = 'planner-hamilton-tasks';
 const CATEGORIES_KEY = 'planner-hamilton-categories';
+const PROJECTS_KEY = 'planner-hamilton-projects';
 
 // Get current user ID from Supabase Auth
 export async function getCurrentUserId(): Promise<string | null> {
@@ -32,6 +33,7 @@ export async function getTasks(): Promise<Task[]> {
             description: task.description || '',
             urgency: task.urgency,
             category: task.category,
+            projectId: task.project_id,
             dayOfWeek: task.day_of_week,
             scheduledDate: task.scheduled_date,
             position: task.position,
@@ -63,6 +65,7 @@ export async function addTask(task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>
                 description: task.description || '',
                 urgency: task.urgency,
                 category: task.category,
+                project_id: task.projectId,
                 day_of_week: task.dayOfWeek,
                 scheduled_date: task.scheduledDate,
                 position: task.position,
@@ -83,6 +86,7 @@ export async function addTask(task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>
             description: data.description,
             urgency: data.urgency,
             category: data.category,
+            projectId: data.project_id,
             dayOfWeek: data.day_of_week,
             scheduledDate: data.scheduled_date,
             position: data.position,
@@ -116,6 +120,7 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<Ta
         if (updates.description !== undefined) dbUpdates.description = updates.description;
         if (updates.urgency !== undefined) dbUpdates.urgency = updates.urgency;
         if (updates.category !== undefined) dbUpdates.category = updates.category;
+        if (updates.projectId !== undefined) dbUpdates.project_id = updates.projectId;
         if (updates.dayOfWeek !== undefined) dbUpdates.day_of_week = updates.dayOfWeek;
         if (updates.scheduledDate !== undefined) dbUpdates.scheduled_date = updates.scheduledDate;
         if (updates.position !== undefined) dbUpdates.position = updates.position;
@@ -143,6 +148,7 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<Ta
             description: data.description,
             urgency: data.urgency,
             category: data.category,
+            projectId: data.project_id,
             dayOfWeek: data.day_of_week,
             scheduledDate: data.scheduled_date,
             position: data.position,
@@ -250,7 +256,119 @@ export async function deleteCategory(id: string): Promise<boolean> {
         // Fallback to localStorage
         const categories = await getCategories();
         const filtered = categories.filter((c) => c.id !== id);
-        localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
+        localStorage.setItem(CATEGORIES_KEY, JSON.stringify(filtered));
+        return true;
+    }
+}
+
+// ==================== PROJECTS ====================
+
+export async function getProjects(): Promise<Project[]> {
+    if (isSupabaseConfigured()) {
+        const { data, error } = await supabase
+            .from('projects')
+            .select('*')
+            .order('created_at', { ascending: true });
+
+        if (error) {
+            console.error('Error fetching projects:', error);
+            return [];
+        }
+
+        return (data || []).map(p => ({
+            id: p.id,
+            name: p.name,
+            description: p.description || '',
+            color: p.color,
+            createdAt: p.created_at,
+            updatedAt: p.updated_at
+        }));
+    } else {
+        const stored = localStorage.getItem(PROJECTS_KEY);
+        return stored ? JSON.parse(stored) : [];
+    }
+}
+
+export async function addProject(project: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>): Promise<Project> {
+    if (isSupabaseConfigured()) {
+        const user = await getCurrentUser();
+        if (!user) throw new Error('No user logged in');
+
+        const { data, error } = await supabase
+            .from('projects')
+            .insert([{
+                user_id: user.id,
+                name: project.name,
+                description: project.description || '',
+                color: project.color
+            }])
+            .select()
+            .single();
+
+        if (error) throw error;
+        return {
+            id: data.id,
+            name: data.name,
+            description: data.description,
+            color: data.color,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at
+        };
+    } else {
+        const newProject: Project = {
+            id: crypto.randomUUID(),
+            ...project,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+        const projects = await getProjects();
+        projects.push(newProject);
+        localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+        return newProject;
+    }
+}
+
+export async function updateProject(id: string, updates: Partial<Project>): Promise<Project | null> {
+    if (isSupabaseConfigured()) {
+        const dbUpdates: any = {};
+        if (updates.name !== undefined) dbUpdates.name = updates.name;
+        if (updates.description !== undefined) dbUpdates.description = updates.description;
+        if (updates.color !== undefined) dbUpdates.color = updates.color;
+
+        const { data, error } = await supabase
+            .from('projects')
+            .update(dbUpdates)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) return null;
+        return {
+            id: data.id,
+            name: data.name,
+            description: data.description,
+            color: data.color,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at
+        };
+    } else {
+        const projects = await getProjects();
+        const idx = projects.findIndex(p => p.id === id);
+        if (idx === -1) return null;
+        projects[idx] = { ...projects[idx], ...updates, updatedAt: new Date().toISOString() };
+        localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+        return projects[idx];
+    }
+}
+
+export async function deleteProject(id: string): Promise<boolean> {
+    if (isSupabaseConfigured()) {
+        const { error } = await supabase.from('projects').delete().eq('id', id);
+        return !error;
+    } else {
+        const projects = await getProjects();
+        const filtered = projects.filter(p => p.id !== id);
+        localStorage.setItem(PROJECTS_KEY, JSON.stringify(filtered));
         return true;
     }
 }

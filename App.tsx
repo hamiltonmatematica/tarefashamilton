@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
 import { Search, Plus, ChevronLeft, ChevronRight, Calendar as CalendarIcon, ArrowLeft, Menu, LayoutDashboard } from 'lucide-react';
-import { Task, Category, Urgency, DayOfWeek } from './types';
+import { Task, Category, Urgency, DayOfWeek, Project } from './types';
 import { DEFAULT_CATEGORIES, getStartOfWeek, getWeekDates, formatDate } from './constants';
 import KanbanBoard from './components/KanbanBoard';
 import Sidebar from './components/Sidebar';
@@ -9,7 +9,20 @@ import TaskModal from './components/TaskModal';
 import HistoryModal from './components/HistoryModal';
 import { CalendarView } from './components/CalendarView';
 import { LoginScreen } from './components/LoginScreen';
-import { getTasks, addTask as addTaskToStorage, updateTask as updateTaskInStorage, deleteTask as deleteTaskFromStorage, getCategories, addCategory as addCategoryToStorage, deleteCategory as deleteCategoryFromStorage, getCurrentUserId } from './lib/storage';
+import { 
+  getTasks, 
+  addTask as addTaskToStorage, 
+  updateTask as updateTaskInStorage, 
+  deleteTask as deleteTaskFromStorage, 
+  getCategories, 
+  addCategory as addCategoryToStorage, 
+  deleteCategory as deleteCategoryFromStorage, 
+  getProjects,
+  addProject as addProjectToStorage,
+  updateProject as updateProjectToStorage,
+  deleteProject as deleteProjectFromStorage,
+  getCurrentUserId 
+} from './lib/storage';
 import { getSession, onAuthStateChange } from './lib/supabase';
 
 type View = 'calendar' | 'week';
@@ -26,6 +39,8 @@ const App: React.FC = () => {
   const [selectedUrgency, setSelectedUrgency] = useState<Urgency | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
 
   // Week Management
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(getStartOfWeek(new Date()));
@@ -144,6 +159,10 @@ const App: React.FC = () => {
             }
 
             setTasks(tasksToSet);
+
+            // Load projects
+            const loadedProjects = await getProjects();
+            setProjects(loadedProjects);
 
           } catch (error) {
             console.error('Error loading data:', error);
@@ -295,34 +314,64 @@ const App: React.FC = () => {
         t.description.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesUrgency = !selectedUrgency || t.urgency === selectedUrgency;
       const matchesCategory = !selectedCategory || t.category === selectedCategory;
+      const matchesProject = !selectedProject || t.projectId === selectedProject;
       const notCompleted = !t.isCompleted;
-      return matchesSearch && matchesUrgency && matchesCategory && notCompleted;
+      return matchesSearch && matchesUrgency && matchesCategory && matchesProject && notCompleted;
     });
-  }, [tasks, searchTerm, selectedUrgency, selectedCategory]);
+  }, [tasks, searchTerm, selectedUrgency, selectedCategory, selectedProject]);
 
-  const addCategory = (name: string, color: string) => {
-    const newCat = { id: crypto.randomUUID(), name, color };
-    setCategories(prev => [...prev, newCat]);
+  const addCategory = async (name: string, color: string) => {
+    try {
+      const newCat = await addCategoryToStorage({ name, color });
+      setCategories(prev => [...prev, newCat]);
+    } catch (error) {
+      console.error('Error adding category:', error);
+    }
   };
 
-  const deleteCategory = (categoryId: string) => {
-    // Update tasks that use this category to use default category
-    const defaultCategoryId = categories[0]?.id;
-    if (defaultCategoryId) {
-      setTasks(prev => prev.map(task =>
-        task.category === categoryId
-          ? { ...task, category: defaultCategoryId }
-          : task
-      ));
+  const deleteCategory = async (categoryId: string) => {
+    try {
+      await deleteCategoryFromStorage(categoryId);
+      // Update tasks that use this category to use default category
+      const defaultCategoryId = categories[0]?.id;
+      if (defaultCategoryId) {
+        setTasks(prev => prev.map(task =>
+          task.category === categoryId
+            ? { ...task, category: defaultCategoryId }
+            : task
+        ));
+      }
+      // Remove category
+      setCategories(prev => prev.filter(cat => cat.id !== categoryId));
+    } catch (error) {
+      console.error('Error deleting category:', error);
     }
-    // Remove category
-    setCategories(prev => prev.filter(cat => cat.id !== categoryId));
   };
 
   const changeWeek = (direction: number) => {
     const nextWeek = new Date(currentWeekStart);
     nextWeek.setDate(currentWeekStart.getDate() + (direction * 7));
     setCurrentWeekStart(nextWeek);
+  };
+
+  const addProject = async (name: string, description: string, color: string) => {
+    try {
+      const newProject = await addProjectToStorage({ name, description, color });
+      setProjects(prev => [...prev, newProject]);
+    } catch (error) {
+      console.error('Error adding project:', error);
+    }
+  };
+
+  const deleteProject = async (id: string) => {
+    try {
+      await deleteProjectFromStorage(id);
+      setProjects(prev => prev.filter(p => p.id !== id));
+      // Update tasks to remove project link
+      setTasks(prev => prev.map(t => t.projectId === id ? { ...t, projectId: undefined } : t));
+    } catch (error) {
+      console.error('Error deleting project:', error);
+    }
   };
 
   const handleDayClick = (date: Date) => {
@@ -338,6 +387,7 @@ const App: React.FC = () => {
     description: t.description,
     priority: (t.urgency === Urgency.HIGH ? 'high' : t.urgency === Urgency.MEDIUM ? 'medium' : 'low') as 'low' | 'medium' | 'high',
     columnId: t.dayOfWeek === 'inbox' ? 'inbox' : (t.scheduledDate || 'inbox'),
+    projectId: t.projectId,
     position: t.position,
     createdAt: t.createdAt,
     updatedAt: new Date().toISOString(),
@@ -384,12 +434,17 @@ const App: React.FC = () => {
       `}>
         <Sidebar
           categories={categories}
+          projects={projects}
           selectedUrgency={selectedUrgency}
           setSelectedUrgency={setSelectedUrgency}
           selectedCategory={selectedCategory}
           setSelectedCategory={setSelectedCategory}
+          selectedProject={selectedProject}
+          setSelectedProject={setSelectedProject}
           addCategory={addCategory}
           deleteCategory={deleteCategory}
+          addProject={addProject}
+          deleteProject={deleteProject}
           onOpenHistory={() => setIsHistoryOpen(true)}
           onClose={() => setIsSidebarOpen(false)}
         />
@@ -521,7 +576,7 @@ const App: React.FC = () => {
 
         <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6">
           {view === 'calendar' ? (
-            <CalendarView tasks={calendarTasks as any} onDayClick={handleDayClick} />
+            <CalendarView tasks={calendarTasks as any} projects={projects} onDayClick={handleDayClick} />
           ) : (
             <DragDropContext onDragEnd={onDragEnd}>
               <KanbanBoard
@@ -540,6 +595,7 @@ const App: React.FC = () => {
         <TaskModal
           task={editingTask}
           categories={categories}
+          projects={projects}
           onClose={() => { setIsTaskModalOpen(false); setEditingTask(null); }}
           onSave={(data) => editingTask ? updateTask(editingTask.id, data) : addTask(data)}
           onDelete={(id) => setTasks(prev => prev.filter(t => t.id !== id))}

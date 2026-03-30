@@ -1,5 +1,6 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { Project } from '../types';
 
 interface CalendarTask {
     id: string;
@@ -7,6 +8,7 @@ interface CalendarTask {
     description: string;
     priority: 'low' | 'medium' | 'high';
     columnId: string;
+    projectId?: string;
     position: number;
     createdAt: string;
     updatedAt: string;
@@ -14,6 +16,7 @@ interface CalendarTask {
 
 interface CalendarViewProps {
     tasks: CalendarTask[];
+    projects: Project[];
     onDayClick: (date: Date) => void;
 }
 
@@ -32,7 +35,7 @@ const PRIORITY_COLORS = {
     undefined: 'bg-slate-400'
 };
 
-export function CalendarView({ tasks, onDayClick }: CalendarViewProps) {
+export function CalendarView({ tasks, projects, onDayClick }: CalendarViewProps) {
     const [currentDate, setCurrentDate] = React.useState(new Date());
 
     const year = currentDate.getFullYear();
@@ -200,19 +203,32 @@ export function CalendarView({ tasks, onDayClick }: CalendarViewProps) {
 
                                     {/* Tasks */}
                                     <div className="space-y-1">
-                                        {dayTasks.slice(0, 3).map((task) => (
-                                            <div
-                                                key={task.id}
-                                                className="flex items-center gap-1 text-xs"
-                                            >
+                                        {dayTasks.slice(0, 3).map((task) => {
+                                            const project = task.projectId ? projects.find(p => p.id === task.projectId) : null;
+                                            return (
                                                 <div
-                                                    className={`w-1 h-1 rounded-full flex-shrink-0 ${PRIORITY_COLORS[task.priority]}`}
-                                                />
-                                                <span className="truncate text-slate-700 font-medium">
-                                                    {task.title}
-                                                </span>
-                                            </div>
-                                        ))}
+                                                    key={task.id}
+                                                    className="flex flex-col gap-0.5 text-[10px]"
+                                                >
+                                                    <div className="flex items-center gap-1">
+                                                        <div
+                                                            className={`w-1 h-1 rounded-full flex-shrink-0 ${PRIORITY_COLORS[task.priority]}`}
+                                                        />
+                                                        <span className="truncate text-slate-700 font-medium leading-tight">
+                                                            {task.title}
+                                                        </span>
+                                                    </div>
+                                                    {project && (
+                                                        <span 
+                                                            className="text-[9px] px-1 rounded truncate w-fit max-w-full font-bold uppercase opacity-80"
+                                                            style={{ backgroundColor: `${project.color}15`, color: project.color, border: `1px solid ${project.color}30` }}
+                                                        >
+                                                            {project.name}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
 
                                         {dayTasks.length > 3 && (
                                             <div className="text-xs text-slate-500 font-medium">

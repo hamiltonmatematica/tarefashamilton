@@ -1,12 +1,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Trash2, FileText, File, Plus, Calendar, Save, Edit3, Eye, Paperclip, Check } from 'lucide-react';
-import { Task, Category, Urgency, DayOfWeek, TaskAttachment } from '../types';
+import { Task, Category, Urgency, DayOfWeek, TaskAttachment, Project } from '../types';
 import { URGENCY_CONFIG } from '../constants';
 
 interface TaskModalProps {
   task: Task | null;
   categories: Category[];
+  projects: Project[];
   onClose: () => void;
   onSave: (data: Partial<Task>) => void;
   onDelete: (id: string) => void;
@@ -14,12 +15,13 @@ interface TaskModalProps {
 
 type ViewMode = 'edit' | 'work';
 
-const TaskModal: React.FC<TaskModalProps> = ({ task, categories, onClose, onSave, onDelete }) => {
+const TaskModal: React.FC<TaskModalProps> = ({ task, categories, projects, onClose, onSave, onDelete }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('edit');
   const [title, setTitle] = useState(task?.title || '');
   const [description, setDescription] = useState(task?.description || '');
   const [urgency, setUrgency] = useState<Urgency>(task?.urgency || Urgency.MEDIUM);
   const [category, setCategory] = useState(task?.category || (categories.length > 0 ? categories[0].id : ''));
+  const [projectId, setProjectId] = useState<string>(task?.projectId || '');
   const [scheduledDate, setScheduledDate] = useState<string>(task?.scheduledDate || '');
   const [notes, setNotes] = useState(task?.notes || '');
   const [attachments, setAttachments] = useState<TaskAttachment[]>(task?.attachments || []);
@@ -48,6 +50,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, categories, onClose, onSave
           description,
           urgency,
           category,
+          projectId: projectId || undefined,
           dayOfWeek: scheduledDate ? 'monday' : 'inbox',
           scheduledDate: scheduledDate || undefined,
           notes: finalNotes,
@@ -77,6 +80,7 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, categories, onClose, onSave
       description,
       urgency,
       category,
+      projectId: projectId || undefined,
       dayOfWeek: scheduledDate ? 'monday' : 'inbox',
       scheduledDate: scheduledDate || undefined,
       notes: finalNotes,
@@ -249,6 +253,20 @@ const TaskModal: React.FC<TaskModalProps> = ({ task, categories, onClose, onSave
                 >
                   {categories.map(cat => (
                     <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Vincular a Projeto</label>
+                <select
+                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20"
+                  value={projectId}
+                  onChange={(e) => setProjectId(e.target.value)}
+                >
+                  <option value="">Nenhum Projeto</option>
+                  {projects.map(proj => (
+                    <option key={proj.id} value={proj.id}>{proj.name}</option>
                   ))}
                 </select>
               </div>

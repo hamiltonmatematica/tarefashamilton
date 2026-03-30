@@ -1,29 +1,39 @@
 
 import React, { useState } from 'react';
-import { LayoutDashboard, Filter, CheckSquare, Plus, Circle, History, X, Trash2, Menu } from 'lucide-react';
-import { Category, Urgency } from '../types';
+import { Category, Urgency, Project } from '../types';
 import { URGENCY_CONFIG } from '../constants';
+import { LayoutDashboard, Filter, CheckSquare, Plus, Circle, History, X, Trash2, Menu, FolderKanban } from 'lucide-react';
 
 interface SidebarProps {
   categories: Category[];
+  projects: Project[];
   selectedUrgency: Urgency | null;
   setSelectedUrgency: (u: Urgency | null) => void;
   selectedCategory: string | null;
   setSelectedCategory: (id: string | null) => void;
+  selectedProject: string | null;
+  setSelectedProject: (id: string | null) => void;
   addCategory: (name: string, color: string) => void;
   deleteCategory: (id: string) => void;
+  addProject: (name: string, description: string, color: string) => void;
+  deleteProject: (id: string) => void;
   onOpenHistory: () => void;
   onClose?: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
   categories,
+  projects,
   selectedUrgency,
   setSelectedUrgency,
   selectedCategory,
   setSelectedCategory,
+  selectedProject,
+  setSelectedProject,
   addCategory,
   deleteCategory,
+  addProject,
+  deleteProject,
   onOpenHistory,
   onClose
 }) => {
@@ -31,11 +41,23 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [newCatName, setNewCatName] = useState('');
   const [newCatColor, setNewCatColor] = useState('#3b82f6');
 
+  const [isAddingProject, setIsAddingProject] = useState(false);
+  const [newProjName, setNewProjName] = useState('');
+  const [newProjColor, setNewProjColor] = useState('#3b82f6');
+
   const handleAddCategory = () => {
     if (newCatName.trim()) {
       addCategory(newCatName.trim(), newCatColor);
       setNewCatName('');
       setIsAddingCategory(false);
+    }
+  };
+
+  const handleAddProject = () => {
+    if (newProjName.trim()) {
+      addProject(newProjName.trim(), '', newProjColor);
+      setNewProjName('');
+      setIsAddingProject(false);
     }
   };
 
@@ -65,8 +87,8 @@ const Sidebar: React.FC<SidebarProps> = ({
             <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 ml-2">Visão</h3>
             <div className="space-y-1">
               <button
-                onClick={() => { setSelectedUrgency(null); setSelectedCategory(null); onClose?.(); }}
-                className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${!selectedUrgency && !selectedCategory ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50'}`}
+                onClick={() => { setSelectedUrgency(null); setSelectedCategory(null); setSelectedProject(null); onClose?.(); }}
+                className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${!selectedUrgency && !selectedCategory && !selectedProject ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50'}`}
               >
                 <CheckSquare className="w-4 h-4 mr-3" />
                 Todas as tarefas
@@ -78,6 +100,43 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <History className="w-4 h-4 mr-3" />
                 Histórico / Lixeira
               </button>
+            </div>
+          </div>
+
+          {/* Projects Filter */}
+          <div>
+            <div className="flex items-center justify-between mb-3 ml-2">
+              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Projetos</h3>
+              <button onClick={() => setIsAddingProject(true)} className="p-1 hover:bg-slate-100 rounded">
+                <Plus className="w-3 h-3 text-slate-500" />
+              </button>
+            </div>
+            <div className="space-y-1">
+              {projects.map((proj) => (
+                <div key={proj.id} className="group relative">
+                  <button
+                    onClick={() => { setSelectedProject(selectedProject === proj.id ? null : proj.id); onClose?.(); }}
+                    className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${selectedProject === proj.id ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
+                  >
+                    <FolderKanban className="w-4 h-4 mr-3" style={{ color: proj.color }} />
+                    <span className="flex-1 text-left truncate">{proj.name}</span>
+                    {selectedProject === proj.id && <X className="w-3 h-3 text-slate-400" />}
+                  </button>
+                  {selectedProject !== proj.id && (
+                    <button
+                      onClick={() => {
+                        if (confirm(`Excluir projeto "${proj.name}"? As tarefas vinculadas deixarão de pertencer a um projeto.`)) {
+                          deleteProject(proj.id);
+                        }
+                      }}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 opacity-0 group-hover:opacity-100 hover:bg-red-50 rounded transition-all z-10"
+                      title="Excluir projeto"
+                    >
+                      <Trash2 className="w-3 h-3 text-red-500" />
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
 
@@ -138,36 +197,71 @@ const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {isAddingCategory && (
+      {(isAddingCategory || isAddingProject) && (
         <div className="p-4 border-t bg-slate-50">
-          <input
-            type="text"
-            placeholder="Nome da categoria"
-            className="w-full px-3 py-2 text-xs border rounded mb-2 outline-none"
-            value={newCatName}
-            onChange={(e) => setNewCatName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
-          />
-          <div className="flex space-x-2">
-            <input
-              type="color"
-              className="w-8 h-8 rounded border-none p-0 bg-transparent cursor-pointer"
-              value={newCatColor}
-              onChange={(e) => setNewCatColor(e.target.value)}
-            />
-            <button
-              onClick={handleAddCategory}
-              className="flex-1 bg-blue-600 text-white text-xs py-1 rounded hover:bg-blue-700"
-            >
-              Adicionar
-            </button>
-            <button
-              onClick={() => setIsAddingCategory(false)}
-              className="px-2 text-xs text-slate-500 hover:text-slate-700"
-            >
-              Cancelar
-            </button>
-          </div>
+          {isAddingCategory ? (
+            <>
+              <input
+                type="text"
+                placeholder="Nome da categoria"
+                className="w-full px-3 py-2 text-xs border rounded mb-2 outline-none"
+                value={newCatName}
+                onChange={(e) => setNewCatName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
+              />
+              <div className="flex space-x-2">
+                <input
+                  type="color"
+                  className="w-8 h-8 rounded border-none p-0 bg-transparent cursor-pointer"
+                  value={newCatColor}
+                  onChange={(e) => setNewCatColor(e.target.value)}
+                />
+                <button
+                  onClick={handleAddCategory}
+                  className="flex-1 bg-blue-600 text-white text-xs py-1 rounded hover:bg-blue-700"
+                >
+                  Adicionar
+                </button>
+                <button
+                  onClick={() => setIsAddingCategory(false)}
+                  className="px-2 text-xs text-slate-500 hover:text-slate-700"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <input
+                type="text"
+                placeholder="Nome do projeto"
+                className="w-full px-3 py-2 text-xs border rounded mb-2 outline-none"
+                value={newProjName}
+                onChange={(e) => setNewProjName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddProject()}
+              />
+              <div className="flex space-x-2">
+                <input
+                  type="color"
+                  className="w-8 h-8 rounded border-none p-0 bg-transparent cursor-pointer"
+                  value={newProjColor}
+                  onChange={(e) => setNewProjColor(e.target.value)}
+                />
+                <button
+                  onClick={handleAddProject}
+                  className="flex-1 bg-blue-600 text-white text-xs py-1 rounded hover:bg-blue-700"
+                >
+                  Criar Projeto
+                </button>
+                <button
+                  onClick={() => setIsAddingProject(false)}
+                  className="px-2 text-xs text-slate-500 hover:text-slate-700"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </aside>
