@@ -168,16 +168,20 @@ export function CalendarView({ tasks, projects, onDayClick }: CalendarViewProps)
                             return (
                                 <div
                                     key={index}
-                                    onClick={() => onDayClick(date)}
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        onDayClick(date);
+                                    }}
                                     className={`
                     min-h-[100px] md:min-h-[120px] p-2 border-b border-r border-slate-200
-                    hover:bg-slate-50 cursor-pointer transition-colors
+                    hover:bg-slate-50 cursor-pointer transition-colors relative z-10
                     ${!isInCurrentMonth ? 'bg-slate-50/50' : 'bg-white'}
                     ${isTodayDate ? 'ring-2 ring-blue-500 ring-inset' : ''}
                   `}
                                 >
                                     {/* Day number and Name */}
-                                    <div className="flex justify-between items-start mb-1">
+                                    <div className="flex justify-between items-start mb-1 pointer-events-none">
                                         <div className="flex items-center gap-2">
                                             <span
                                                 className={`
