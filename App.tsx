@@ -352,8 +352,9 @@ const App: React.FC = () => {
 
   const changeWeek = (direction: number) => {
     const nextWeek = new Date(currentWeekStart);
-    nextWeek.setDate(currentWeekStart.getDate() + (direction * 7));
-    setCurrentWeekStart(nextWeek);
+    nextWeek.setHours(12, 0, 0, 0); // set to noon to avoid shifting due to DST when jumping 7 days
+    nextWeek.setDate(nextWeek.getDate() + (direction * 7));
+    setCurrentWeekStart(getStartOfWeek(nextWeek));
   };
 
   const addProject = async (name: string, description: string, color: string) => {
@@ -531,21 +532,21 @@ const App: React.FC = () => {
               />
             </div>
 
-            {/* Week Navigation - Desktop */}
-            <div className="hidden md:flex items-center bg-slate-100 p-1 rounded-lg">
+            {/* Week Navigation */}
+            <div className="flex items-center bg-slate-100 p-1 rounded-lg">
               <button onClick={() => changeWeek(-1)} className="p-1 hover:bg-white hover:shadow-sm rounded transition-all">
                 <ChevronLeft className="w-4 h-4 text-slate-600" />
               </button>
-              <div className="px-3 flex items-center space-x-2 text-xs font-bold text-slate-600">
-                <CalendarIcon className="w-3 h-3" />
-                <span>Semana de {currentWeekStart.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}</span>
+              <div className="px-2 md:px-3 flex items-center space-x-1 md:space-x-2 text-[10px] md:text-xs font-bold text-slate-600">
+                <CalendarIcon className="w-3 h-3 hidden sm:block" />
+                <span className="whitespace-nowrap">Semana de {currentWeekStart.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}</span>
               </div>
               <button onClick={() => changeWeek(1)} className="p-1 hover:bg-white hover:shadow-sm rounded transition-all">
                 <ChevronRight className="w-4 h-4 text-slate-600" />
               </button>
               <button
                 onClick={() => setCurrentWeekStart(getStartOfWeek(new Date()))}
-                className="ml-2 px-2 py-1 text-[10px] bg-white text-blue-600 rounded border shadow-sm hover:bg-blue-50"
+                className="ml-1 md:ml-2 px-2 py-1 text-[10px] bg-white text-blue-600 rounded border shadow-sm hover:bg-blue-50"
               >
                 Hoje
               </button>
