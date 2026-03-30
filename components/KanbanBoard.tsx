@@ -1,19 +1,20 @@
 
 import React from 'react';
 import { Droppable, Draggable } from '@hello-pangea/dnd';
-import { Task, DayOfWeek, Category } from '../types';
+import { Task, DayOfWeek, Category, Project } from '../types';
 import { DAY_LABELS } from '../constants';
 import TaskCard from './TaskCard';
 
 interface KanbanBoardProps {
   tasks: Task[];
   categories: Category[];
+  projects: Project[];
   weekColumns: { date: string, label: string, dayKey: DayOfWeek }[];
   onTaskClick: (task: Task) => void;
   onCompleteTask: (id: string) => void;
 }
 
-const KanbanBoard: React.FC<KanbanBoardProps> = ({ tasks, categories, weekColumns, onTaskClick, onCompleteTask }) => {
+const KanbanBoard: React.FC<KanbanBoardProps> = ({ tasks, categories, projects, weekColumns, onTaskClick, onCompleteTask }) => {
   // Inbox is special
   const columns = [
     { id: 'inbox', label: DAY_LABELS['inbox'], isInbox: true },
@@ -65,6 +66,7 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tasks, categories, weekColumn
                             <TaskCard
                               task={task}
                               category={categories.find(c => c.id === task.category)}
+                              project={task.projectId ? projects.find(p => p.id === task.projectId) : undefined}
                               onClick={() => onTaskClick(task)}
                               onComplete={() => onCompleteTask(task.id)}
                             />

@@ -1,16 +1,17 @@
 import React from 'react';
 import { Circle, FileText, Image as ImageIcon } from 'lucide-react';
-import { Task, Category } from '../types';
+import { Task, Category, Project } from '../types';
 import { URGENCY_CONFIG } from '../constants';
 
 interface TaskCardProps {
   task: Task;
   category?: Category;
+  project?: Project;
   onClick: () => void;
   onComplete: () => void;
 }
 
-const TaskCard: React.FC<TaskCardProps> = ({ task, category, onClick, onComplete }) => {
+const TaskCard: React.FC<TaskCardProps> = ({ task, category, project, onClick, onComplete }) => {
   const urgencyStyle = URGENCY_CONFIG[task.urgency];
 
   return (
@@ -24,14 +25,21 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, category, onClick, onComplete
       <div className="flex flex-col space-y-3">
         <div className="flex items-start justify-between">
           <div className="flex items-center space-x-2 overflow-hidden">
-            {category && (
+            {project ? (
+              <span
+                className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider truncate"
+                style={{ backgroundColor: `${project.color}15`, color: project.color, border: `1px solid ${project.color}30` }}
+              >
+                {project.name}
+              </span>
+            ) : category ? (
               <span
                 className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider truncate"
                 style={{ backgroundColor: `${category.color}15`, color: category.color }}
               >
                 {category.name}
               </span>
-            )}
+            ) : null}
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${urgencyStyle?.bg || 'bg-gray-50'} ${urgencyStyle?.text || 'text-gray-700'}`}>
               {urgencyStyle?.label || task.urgency}
             </span>
