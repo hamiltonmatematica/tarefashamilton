@@ -17,6 +17,7 @@ interface SidebarProps {
   deleteCategory: (id: string) => void;
   addProject: (name: string, description: string, color: string) => void;
   deleteProject: (id: string) => void;
+  onOpenProject: (id: string) => void;
   onOpenHistory: () => void;
   onClose?: () => void;
 }
@@ -34,6 +35,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   deleteCategory,
   addProject,
   deleteProject,
+  onOpenProject,
   onOpenHistory,
   onClose
 }) => {
@@ -115,26 +117,23 @@ const Sidebar: React.FC<SidebarProps> = ({
               {projects.map((proj) => (
                 <div key={proj.id} className="group relative">
                   <button
-                    onClick={() => { setSelectedProject(selectedProject === proj.id ? null : proj.id); onClose?.(); }}
-                    className={`w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors ${selectedProject === proj.id ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
+                    onClick={() => { onOpenProject(proj.id); onClose?.(); }}
+                    className="w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-colors text-slate-600 hover:bg-slate-50"
                   >
-                    <FolderKanban className="w-4 h-4 mr-3" style={{ color: proj.color }} />
+                    <FolderKanban className="w-4 h-4 mr-3 flex-shrink-0" style={{ color: proj.color }} />
                     <span className="flex-1 text-left truncate">{proj.name}</span>
-                    {selectedProject === proj.id && <X className="w-3 h-3 text-slate-400" />}
                   </button>
-                  {selectedProject !== proj.id && (
-                    <button
-                      onClick={() => {
-                        if (confirm(`Excluir projeto "${proj.name}"? As tarefas vinculadas deixarão de pertencer a um projeto.`)) {
-                          deleteProject(proj.id);
-                        }
-                      }}
-                      className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 opacity-0 group-hover:opacity-100 hover:bg-red-50 rounded transition-all z-10"
-                      title="Excluir projeto"
-                    >
-                      <Trash2 className="w-3 h-3 text-red-500" />
-                    </button>
-                  )}
+                  <button
+                    onClick={() => {
+                      if (confirm(`Excluir projeto "${proj.name}"? As etapas vinculadas perderão o vínculo.`)) {
+                        deleteProject(proj.id);
+                      }
+                    }}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 opacity-0 group-hover:opacity-100 hover:bg-red-50 rounded transition-all z-10"
+                    title="Excluir projeto"
+                  >
+                    <Trash2 className="w-3 h-3 text-red-500" />
+                  </button>
                 </div>
               ))}
             </div>

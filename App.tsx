@@ -7,6 +7,7 @@ import KanbanBoard from './components/KanbanBoard';
 import Sidebar from './components/Sidebar';
 import TaskModal from './components/TaskModal';
 import HistoryModal from './components/HistoryModal';
+import ProjectDetail from './components/ProjectDetail';
 import { CalendarView } from './components/CalendarView';
 import { LoginScreen } from './components/LoginScreen';
 import { 
@@ -41,6 +42,7 @@ const App: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [openProjectId, setOpenProjectId] = useState<string | null>(null);
 
   // Week Management
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(getStartOfWeek(new Date()));
@@ -374,6 +376,28 @@ const App: React.FC = () => {
     }
   };
 
+  const addStepToProject = async (projectId: string, data: { title: string; scheduledDate: string; notes: string }) => {
+    try {
+      const project = projects.find(p => p.id === projectId);
+      const newTask = await addTaskToStorage({
+        title: data.title,
+        description: data.notes || '',
+        urgency: Urgency.MEDIUM,
+        category: categories[0]?.id || '',
+        projectId,
+        dayOfWeek: data.scheduledDate ? 'monday' : 'inbox',
+        scheduledDate: data.scheduledDate || undefined,
+        position: tasks.length,
+        notes: '',
+        attachments: [],
+        isCompleted: false,
+      });
+      setTasks(prev => [...prev, newTask]);
+    } catch (error) {
+      console.error('Error adding project step:', error);
+    }
+  };
+
   const handleDayClick = (date: Date) => {
     // Set the week to the clicked date's week
     setCurrentWeekStart(getStartOfWeek(date));
@@ -445,6 +469,7 @@ const App: React.FC = () => {
           deleteCategory={deleteCategory}
           addProject={addProject}
           deleteProject={deleteProject}
+          onOpenProject={(id) => setOpenProjectId(id)}
           onOpenHistory={() => setIsHistoryOpen(true)}
           onClose={() => setIsSidebarOpen(false)}
         />
@@ -611,6 +636,24 @@ const App: React.FC = () => {
           onPermanentDelete={(id) => setTasks(prev => prev.filter(t => t.id !== id))}
         />
       )}
+
+      {openProjectId && (() => {
+        const proj = projects.find(p => p.id === openProjectId);
+        if (!proj) return null;
+        return (
+          <ProjectDetail
+            project={proj}
+            tasks={tasks}
+            onClose={() => setOpenProjectId(null)}
+            onAddStep={(data) => addStepToProject(openProjectId, data)}
+            onDeleteStep={(id) => {
+              deleteTaskFromStorage(id);
+              setTasks(prev => prev.filter(t => t.id !== id));
+            }}
+            onCompleteStep={completeTask}
+          />
+        );
+      })()}
     </div>
   );
 };
