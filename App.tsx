@@ -608,6 +608,7 @@ const App: React.FC = () => {
               <KanbanBoard
                 tasks={filteredTasks}
                 categories={categories}
+                projects={projects}
                 weekColumns={weekColumns}
                 onTaskClick={(task) => { setEditingTask(task); setIsTaskModalOpen(true); }}
                 onCompleteTask={completeTask}
