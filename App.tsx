@@ -1,199 +1,150 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { DragDropContext, DropResult } from '@hello-pangea/dnd';
-import { Search, Plus, ChevronLeft, ChevronRight, Calendar as CalendarIcon, ArrowLeft, Menu, LayoutDashboard } from 'lucide-react';
-import { Task, Category, Urgency, DayOfWeek, Project } from './types';
-import { DEFAULT_CATEGORIES, getStartOfWeek, getWeekDates, formatDate } from './constants';
+import { Search, Plus, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Menu, Sparkles } from 'lucide-react';
+import { Task, Category, Urgency, DayOfWeek, Project, TaskStatus, View } from './types';
+import { DEFAULT_CATEGORIES, getStartOfWeek, getWeekDates, formatDate, todayISO, isOverdue } from './constants';
 import KanbanBoard from './components/KanbanBoard';
 import Sidebar from './components/Sidebar';
 import TaskModal from './components/TaskModal';
 import HistoryModal from './components/HistoryModal';
-import ProjectDetail from './components/ProjectDetail';
+import ProjectBoard from './components/ProjectBoard';
+import QuickAdd from './components/QuickAdd';
+import TodayView from './components/TodayView';
+import Dashboard from './components/Dashboard';
 import { CalendarView } from './components/CalendarView';
 import { LoginScreen } from './components/LoginScreen';
-import { 
-  getTasks, 
-  addTask as addTaskToStorage, 
-  updateTask as updateTaskInStorage, 
-  deleteTask as deleteTaskFromStorage, 
-  getCategories, 
-  addCategory as addCategoryToStorage, 
-  deleteCategory as deleteCategoryFromStorage, 
-  getProjects,
-  addProject as addProjectToStorage,
-  updateProject as updateProjectToStorage,
-  deleteProject as deleteProjectFromStorage,
-  getCurrentUserId 
+import { buildRecurringClone } from './lib/recurrence';
+import {
+  getTasks, addTask as addTaskToStorage, updateTask as updateTaskInStorage,
+  deleteTask as deleteTaskFromStorage,
+  getCategories, addCategory as addCategoryToStorage, deleteCategory as deleteCategoryFromStorage,
+  getProjects, addProject as addProjectToStorage, updateProject as updateProjectToStorage,
+  deleteProject as deleteProjectFromStorage, getCurrentUserId
 } from './lib/storage';
 import { getSession, onAuthStateChange } from './lib/supabase';
 
-type View = 'calendar' | 'week';
-
 const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [view, setView] = useState<View>('calendar');
+  const [view, setView] = useState<View>('today');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const [quickAddDefaults, setQuickAddDefaults] = useState<{ projectId?: string; date?: string }>({});
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [taskModalDefaults, setTaskModalDefaults] = useState<{ projectId?: string; status?: TaskStatus }>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUrgency, setSelectedUrgency] = useState<Urgency | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [openProjectId, setOpenProjectId] = useState<string | null>(null);
 
-  // Week Management
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(getStartOfWeek(new Date()));
-
   const weekColumns = useMemo(() => getWeekDates(currentWeekStart), [currentWeekStart]);
 
-  // Check for existing session on mount
+  // Auth
   useEffect(() => {
     const checkSession = async () => {
       const session = await getSession();
-      if (session) {
-        setIsAuthenticated(true);
-      }
+      if (session) setIsAuthenticated(true);
     };
     checkSession();
 
-    // Listen for auth changes
     const { data: { subscription } } = onAuthStateChange((event, session) => {
       setIsAuthenticated(!!session);
     });
 
-    return () => {
-      subscription.unsubscribe();
-    };
+    return () => subscription.unsubscribe();
   }, []);
 
-  // Auto-cleanup: Remove tasks older than 30 days
+  // Auto cleanup das concluídas + 30 dias
   useEffect(() => {
-    const cleanupOldTasks = () => {
+    const cleanup = () => {
       const now = new Date();
       setTasks(prev => prev.filter(task => {
         if (!task.isCompleted || !task.completedAt) return true;
         const completedDate = new Date(task.completedAt);
         const daysPassed = (now.getTime() - completedDate.getTime()) / (1000 * 60 * 60 * 24);
-        return daysPassed < 30; // Keep only tasks completed less than 30 days ago
+        return daysPassed < 30;
       }));
     };
-
-    // Run cleanup on mount and every hour
-    cleanupOldTasks();
-    const interval = setInterval(cleanupOldTasks, 60 * 60 * 1000); // Every hour
+    cleanup();
+    const interval = setInterval(cleanup, 60 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
-  // Load tasks and categories from Supabase when user is authenticated
+  // Carrega dados quando autenticado
   useEffect(() => {
     const loadData = async () => {
-      if (isAuthenticated) {
-        const userId = await getCurrentUserId();
-        if (userId) {
-          try {
-            // Load categories first to have the correct UUIDs
-            let loadedCategories = await getCategories();
+      if (!isAuthenticated) return;
+      const userId = await getCurrentUserId();
+      if (!userId) return;
 
-            if (loadedCategories.length === 0) {
-              // Initialize with default categories if empty
-              loadedCategories = DEFAULT_CATEGORIES;
-              setCategories(DEFAULT_CATEGORIES);
-              // Save default categories to Supabase
-              for (const cat of DEFAULT_CATEGORIES) {
-                // When we save, we need to capture the returned category with the real UUID
-                // But addCategoryToStorage returns the saved category, so we can use that if we were doing it one by one
-                // For now, let's just save them. The next reload will get the correct UUIDs.
-                // Or better: update local state with the saved ones.
-                await addCategoryToStorage(cat);
-              }
-              // Reload to get the UUIDs
-              loadedCategories = await getCategories();
-            }
-
-            setCategories(loadedCategories);
-
-            // Load tasks
-            const loadedTasks = await getTasks();
-
-            // Fix legacy category IDs if needed
-            let tasksToSet = loadedTasks;
-            let checksNeeded = false;
-
-            const legacyIds = ['1', '2', '3', '4'];
-            const tasksWithLegacyIds = loadedTasks.filter(t => legacyIds.includes(t.category));
-
-            if (tasksWithLegacyIds.length > 0) {
-              console.log('Found tasks with legacy category IDs. Fixing...', tasksWithLegacyIds.length);
-
-              const updates = tasksWithLegacyIds.map(async (task) => {
-                // Find the correct category UUID based on the legacy ID/Name mapping
-                // '1' -> Pessoal, '2' -> Áurea, etc.
-                const legacyMap: Record<string, string> = {
-                  '1': 'Pessoal',
-                  '2': 'Áurea',
-                  '3': 'Tráfego Pago',
-                  '4': 'Consultoria IA'
-                };
-
-                const targetName = legacyMap[task.category];
-                if (targetName) {
-                  const correctCategory = loadedCategories.find(c => c.name === targetName);
-                  if (correctCategory) {
-                    // Update in Supabase
-                    await updateTaskInStorage(task.id, { category: correctCategory.id });
-                    // Return updated task for local state
-                    return { ...task, category: correctCategory.id };
-                  }
-                }
-                return task;
-              });
-
-              const updatedTasksWithLegacy = await Promise.all(updates);
-
-              // Merge updated tasks back into the main list
-              tasksToSet = loadedTasks.map(t => {
-                const updated = updatedTasksWithLegacy.find(ut => ut.id === t.id);
-                return updated || t;
-              });
-            }
-
-            setTasks(tasksToSet);
-
-            // Load projects
-            const loadedProjects = await getProjects();
-            setProjects(loadedProjects);
-
-          } catch (error) {
-            console.error('Error loading data:', error);
-          }
+      try {
+        let loadedCategories = await getCategories();
+        if (loadedCategories.length === 0) {
+          loadedCategories = DEFAULT_CATEGORIES;
+          for (const cat of DEFAULT_CATEGORIES) await addCategoryToStorage(cat);
+          loadedCategories = await getCategories();
         }
+        setCategories(loadedCategories);
+
+        const loadedTasks = await getTasks();
+
+        // Fix legacy
+        const legacyIds = ['1', '2', '3', '4'];
+        const legacyMap: Record<string, string> = {
+          '1': 'Pessoal', '2': 'Áurea', '3': 'Tráfego Pago', '4': 'Consultoria IA'
+        };
+        const fixed = await Promise.all(loadedTasks.map(async t => {
+          if (legacyIds.includes(t.category)) {
+            const name = legacyMap[t.category];
+            const correct = loadedCategories.find(c => c.name === name);
+            if (correct) {
+              await updateTaskInStorage(t.id, { category: correct.id });
+              return { ...t, category: correct.id };
+            }
+          }
+          return t;
+        }));
+
+        setTasks(fixed);
+
+        const loadedProjects = await getProjects();
+        setProjects(loadedProjects);
+      } catch (e) {
+        console.error('Error loading data:', e);
       }
     };
-
     loadData();
   }, [isAuthenticated]);
 
-  // Save tasks to localStorage
+  // Atalho Cmd+K / Ctrl+K
   useEffect(() => {
-    // Convert app format to storage format
-    const storageTasks = tasks.map(t => ({
-      id: t.id,
-      title: t.title,
-      description: t.description,
-      priority: t.urgency === Urgency.HIGH ? 'high' : t.urgency === Urgency.MEDIUM ? 'medium' : 'low',
-      columnId: t.dayOfWeek === 'inbox' ? 'inbox' : (t.scheduledDate || 'inbox'),
-      position: t.position,
-      category: t.category,
-      createdAt: t.createdAt,
-      updatedAt: t.updatedAt,
-    }));
+    const handleKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsQuickAddOpen(true);
+      }
+      if (e.key === 'Escape' && isQuickAddOpen) {
+        setIsQuickAddOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [isQuickAddOpen]);
 
-    // saveTasks(storageTasks as any); // This line is commented out in the original, keeping it that way.
-    localStorage.setItem('planner-hamilton-categories', JSON.stringify(categories));
-  }, [tasks, categories]);
+  // Responsivo
+  useEffect(() => {
+    const handleResize = () => setIsSidebarOpen(window.innerWidth >= 1024);
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // ============ Task CRUD ============
 
   const addTask = async (data: Partial<Task>) => {
     try {
@@ -201,271 +152,275 @@ const App: React.FC = () => {
         title: data.title || '',
         description: data.description || '',
         urgency: data.urgency || Urgency.MEDIUM,
-        category: data.category || categories[0]?.id,
+        status: data.status || 'todo',
+        category: data.category || categories[0]?.id || '',
+        projectId: data.projectId,
         dayOfWeek: data.dayOfWeek || 'inbox',
         scheduledDate: data.scheduledDate,
+        dueDate: data.dueDate,
         position: tasks.length,
         notes: data.notes || '',
+        checklist: data.checklist || [],
+        recurrence: data.recurrence || 'none',
         attachments: data.attachments || [],
-        isCompleted: false
+        isCompleted: false,
       });
       setTasks(prev => [...prev, newTask]);
-    } catch (error) {
-      console.error('Error adding task:', error);
+      return newTask;
+    } catch (e) {
+      console.error('Error adding task:', e);
     }
-    setIsTaskModalOpen(false);
   };
 
   const updateTask = async (id: string, updates: Partial<Task>) => {
     try {
       await updateTaskInStorage(id, updates);
       setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates, updatedAt: new Date().toISOString() } : t));
-    } catch (error) {
-      console.error('Error updating task:', error);
+    } catch (e) {
+      console.error('Error updating task:', e);
     }
-    setIsTaskModalOpen(false);
-    setEditingTask(null);
   };
 
   const completeTask = async (id: string) => {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
     const now = new Date().toISOString();
-    await updateTask(id, { isCompleted: true, completedAt: now });
+    await updateTask(id, { isCompleted: true, status: 'done', completedAt: now });
+
+    // Recriar se for recorrente
+    if (task.recurrence && task.recurrence !== 'none') {
+      const clone = buildRecurringClone(task);
+      try {
+        const newTask = await addTaskToStorage({ ...clone, position: tasks.length });
+        setTasks(prev => [...prev, newTask]);
+      } catch (e) {
+        console.error('Error recreating recurring task:', e);
+      }
+    }
   };
 
   const restoreTask = async (id: string) => {
-    await updateTask(id, { isCompleted: false, completedAt: undefined });
+    await updateTask(id, { isCompleted: false, status: 'todo', completedAt: undefined });
   };
+
+  const changeStatus = async (id: string, status: TaskStatus) => {
+    if (status === 'done') {
+      await completeTask(id);
+    } else {
+      const task = tasks.find(t => t.id === id);
+      const wasCompleted = task?.isCompleted;
+      await updateTask(id, { status, isCompleted: false, completedAt: undefined });
+      if (wasCompleted) {
+        // Garantia adicional
+      }
+    }
+  };
+
+  const deleteTaskById = async (id: string) => {
+    await deleteTaskFromStorage(id);
+    setTasks(prev => prev.filter(t => t.id !== id));
+  };
+
+  // ============ Drag & Drop ============
 
   const onDragEnd = async (result: DropResult) => {
     const { source, destination, draggableId } = result;
-
     if (!destination) return;
     if (source.droppableId === destination.droppableId && source.index === destination.index) return;
 
-    // Find the task being moved
     const taskToMove = tasks.find(t => t.id === draggableId);
     if (!taskToMove) return;
 
-    // Create updated task with new position/column
-    const updatedTask = { ...taskToMove };
-
+    const updated = { ...taskToMove };
     if (destination.droppableId === 'inbox') {
-      updatedTask.dayOfWeek = 'inbox';
-      updatedTask.scheduledDate = undefined;
+      updated.dayOfWeek = 'inbox';
+      updated.scheduledDate = undefined;
     } else {
-      // Find the date associated with the droppable column
       const col = weekColumns.find(c => c.date === destination.droppableId);
       if (col) {
-        updatedTask.scheduledDate = col.date;
-        updatedTask.dayOfWeek = col.dayKey;
+        updated.scheduledDate = col.date;
+        updated.dayOfWeek = col.dayKey;
       }
     }
 
-    // Get all tasks in the destination column (excluding the task being moved)
-    const destinationTasks = tasks
+    const destTasks = tasks
       .filter(t => {
-        if (t.id === draggableId) return false; // Exclude the task being moved
-        if (destination.droppableId === 'inbox') {
-          return t.dayOfWeek === 'inbox';
-        }
+        if (t.id === draggableId) return false;
+        if (destination.droppableId === 'inbox') return t.dayOfWeek === 'inbox';
         return t.scheduledDate === destination.droppableId;
       })
       .sort((a, b) => a.position - b.position);
 
-    // Insert the moved task at the destination index
-    destinationTasks.splice(destination.index, 0, updatedTask);
+    destTasks.splice(destination.index, 0, updated);
+    destTasks.forEach((t, i) => { t.position = i; });
 
-    // Update positions for all tasks in destination column
-    destinationTasks.forEach((t, i) => {
-      t.position = i;
-    });
-
-    // Create the final tasks array
     const finalTasks = tasks.map(t => {
-      if (t.id === draggableId) return updatedTask;
-      const destTask = destinationTasks.find(dt => dt.id === t.id);
-      return destTask || t;
+      if (t.id === draggableId) return updated;
+      const found = destTasks.find(dt => dt.id === t.id);
+      return found || t;
     });
 
-    // Update state immediately for UI responsiveness
     setTasks(finalTasks);
 
-    // Persist to Supabase
     try {
-      // Update the moved task
-      await updateTaskInStorage(updatedTask.id, {
-        dayOfWeek: updatedTask.dayOfWeek,
-        scheduledDate: updatedTask.scheduledDate,
-        position: updatedTask.position
+      await updateTaskInStorage(updated.id, {
+        dayOfWeek: updated.dayOfWeek,
+        scheduledDate: updated.scheduledDate,
+        position: updated.position,
       });
-
-      // Update positions of all affected tasks in destination column
-      for (const task of destinationTasks) {
-        if (task.id !== updatedTask.id) {
-          await updateTaskInStorage(task.id, { position: task.position });
-        }
+      for (const t of destTasks) {
+        if (t.id !== updated.id) await updateTaskInStorage(t.id, { position: t.position });
       }
-    } catch (error) {
-      console.error('Error persisting drag-and-drop:', error);
+    } catch (e) {
+      console.error('Error persisting drag:', e);
     }
   };
 
-  const filteredTasks = useMemo(() => {
-    return tasks.filter(t => {
-      const matchesSearch = t.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        t.description.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesUrgency = !selectedUrgency || t.urgency === selectedUrgency;
-      const matchesCategory = !selectedCategory || t.category === selectedCategory;
-      const matchesProject = !selectedProject || t.projectId === selectedProject;
-      const notCompleted = !t.isCompleted;
-      return matchesSearch && matchesUrgency && matchesCategory && matchesProject && notCompleted;
-    });
-  }, [tasks, searchTerm, selectedUrgency, selectedCategory, selectedProject]);
+  // ============ Categories / Projects ============
 
   const addCategory = async (name: string, color: string) => {
     try {
-      const newCat = await addCategoryToStorage({ name, color });
-      setCategories(prev => [...prev, newCat]);
-    } catch (error) {
-      console.error('Error adding category:', error);
-    }
+      const c = await addCategoryToStorage({ name, color });
+      setCategories(prev => [...prev, c]);
+    } catch (e) { console.error(e); }
   };
 
-  const deleteCategory = async (categoryId: string) => {
+  const deleteCategory = async (id: string) => {
     try {
-      await deleteCategoryFromStorage(categoryId);
-      // Update tasks that use this category to use default category
-      const defaultCategoryId = categories[0]?.id;
-      if (defaultCategoryId) {
-        setTasks(prev => prev.map(task =>
-          task.category === categoryId
-            ? { ...task, category: defaultCategoryId }
-            : task
-        ));
-      }
-      // Remove category
-      setCategories(prev => prev.filter(cat => cat.id !== categoryId));
-    } catch (error) {
-      console.error('Error deleting category:', error);
-    }
-  };
-
-  const changeWeek = (direction: number) => {
-    const nextWeek = new Date(currentWeekStart);
-    nextWeek.setHours(12, 0, 0, 0); // set to noon to avoid shifting due to DST when jumping 7 days
-    nextWeek.setDate(nextWeek.getDate() + (direction * 7));
-    setCurrentWeekStart(getStartOfWeek(nextWeek));
+      await deleteCategoryFromStorage(id);
+      const def = categories[0]?.id;
+      if (def) setTasks(prev => prev.map(t => t.category === id ? { ...t, category: def } : t));
+      setCategories(prev => prev.filter(c => c.id !== id));
+    } catch (e) { console.error(e); }
   };
 
   const addProject = async (name: string, description: string, color: string) => {
     try {
-      const newProject = await addProjectToStorage({ name, description, color });
-      setProjects(prev => [...prev, newProject]);
-    } catch (error) {
-      console.error('Error adding project:', error);
-    }
+      const p = await addProjectToStorage({ name, description, color });
+      setProjects(prev => [...prev, p]);
+    } catch (e) { console.error(e); }
+  };
+
+  const updateProject = async (id: string, updates: Partial<Project>) => {
+    try {
+      const updated = await updateProjectToStorage(id, updates);
+      if (updated) setProjects(prev => prev.map(p => p.id === id ? updated : p));
+    } catch (e) { console.error(e); }
   };
 
   const deleteProject = async (id: string) => {
     try {
       await deleteProjectFromStorage(id);
       setProjects(prev => prev.filter(p => p.id !== id));
-      // Update tasks to remove project link
       setTasks(prev => prev.map(t => t.projectId === id ? { ...t, projectId: undefined } : t));
-    } catch (error) {
-      console.error('Error deleting project:', error);
-    }
+      if (openProjectId === id) setOpenProjectId(null);
+    } catch (e) { console.error(e); }
   };
 
-  const addStepToProject = async (projectId: string, data: { title: string; scheduledDate: string; notes: string }) => {
-    try {
-      const project = projects.find(p => p.id === projectId);
-      const newTask = await addTaskToStorage({
-        title: data.title,
-        description: data.notes || '',
-        urgency: Urgency.MEDIUM,
-        category: categories[0]?.id || '',
-        projectId,
-        dayOfWeek: data.scheduledDate ? 'monday' : 'inbox',
-        scheduledDate: data.scheduledDate || undefined,
-        position: tasks.length,
-        notes: '',
-        attachments: [],
-        isCompleted: false,
-      });
-      setTasks(prev => [...prev, newTask]);
-    } catch (error) {
-      console.error('Error adding project step:', error);
-    }
-  };
+  // ============ Filtered & derived ============
+
+  const filteredTasks = useMemo(() => {
+    return tasks.filter(t => {
+      const matchesSearch = !searchTerm ||
+        t.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        t.description.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesUrgency = !selectedUrgency || t.urgency === selectedUrgency;
+      const matchesCategory = !selectedCategory || t.category === selectedCategory;
+      const notCompleted = !t.isCompleted;
+      return matchesSearch && matchesUrgency && matchesCategory && notCompleted;
+    });
+  }, [tasks, searchTerm, selectedUrgency, selectedCategory]);
+
+  const pendingByProject = useMemo(() => {
+    const map: Record<string, number> = {};
+    tasks.forEach(t => {
+      if (t.projectId && !t.isCompleted) map[t.projectId] = (map[t.projectId] || 0) + 1;
+    });
+    return map;
+  }, [tasks]);
+
+  const overdueByProject = useMemo(() => {
+    const map: Record<string, number> = {};
+    tasks.forEach(t => {
+      if (t.projectId && !t.isCompleted && isOverdue(t.dueDate || t.scheduledDate)) {
+        map[t.projectId] = (map[t.projectId] || 0) + 1;
+      }
+    });
+    return map;
+  }, [tasks]);
+
+  const today = todayISO();
+  const todayCount = useMemo(() => tasks.filter(t => !t.isCompleted && (t.dueDate || t.scheduledDate) === today).length, [tasks, today]);
+  const overdueCount = useMemo(() => tasks.filter(t => !t.isCompleted && isOverdue(t.dueDate || t.scheduledDate)).length, [tasks]);
 
   const handleDayClick = (date: Date) => {
-    // Set the week to the clicked date's week
     setCurrentWeekStart(getStartOfWeek(date));
     setView('week');
   };
 
-  // Convert tasks to storage format for CalendarView
-  const calendarTasks = tasks.map(t => ({
-    id: t.id,
-    title: t.title,
-    description: t.description,
-    priority: (t.urgency === Urgency.HIGH ? 'high' : t.urgency === Urgency.MEDIUM ? 'medium' : 'low') as 'low' | 'medium' | 'high',
-    columnId: t.dayOfWeek === 'inbox' ? 'inbox' : (t.scheduledDate || 'inbox'),
-    projectId: t.projectId,
-    position: t.position,
-    createdAt: t.createdAt,
-    updatedAt: new Date().toISOString(),
-  }));
+  const openTaskModal = (task: Task | null, defaults: { projectId?: string; status?: TaskStatus } = {}) => {
+    setEditingTask(task);
+    setTaskModalDefaults(defaults);
+    setIsTaskModalOpen(true);
+  };
 
-  // Handle screen resize for sidebar
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth < 1024) {
-        setIsSidebarOpen(false);
-      } else {
-        setIsSidebarOpen(true);
-      }
-    };
+  const openQuickAdd = (defaults: { projectId?: string; date?: string } = {}) => {
+    setQuickAddDefaults(defaults);
+    setIsQuickAddOpen(true);
+  };
 
-    // Set initial state
-    handleResize();
+  const changeWeek = (direction: number) => {
+    const next = new Date(currentWeekStart);
+    next.setHours(12, 0, 0, 0);
+    next.setDate(next.getDate() + (direction * 7));
+    setCurrentWeekStart(getStartOfWeek(next));
+  };
 
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  // Show login screen if not authenticated
   if (!isAuthenticated) {
     return <LoginScreen onLogin={() => setIsAuthenticated(true)} />;
   }
 
+  const openedProject = openProjectId ? projects.find(p => p.id === openProjectId) : null;
+
+  // ============ Calendar adapter (legado) ============
+  const calendarTasks = tasks.map(t => ({
+    id: t.id,
+    title: t.title,
+    description: t.description,
+    priority: (t.urgency === Urgency.CRITICAL || t.urgency === Urgency.HIGH ? 'high' : t.urgency === Urgency.MEDIUM ? 'medium' : 'low') as 'low' | 'medium' | 'high',
+    columnId: t.dayOfWeek === 'inbox' ? 'inbox' : (t.scheduledDate || 'inbox'),
+    projectId: t.projectId,
+    position: t.position,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt || new Date().toISOString(),
+  }));
+
   return (
     <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden relative">
-      {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-20 lg:hidden"
-          onClick={() => setIsSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 bg-black/50 z-20 lg:hidden" onClick={() => setIsSidebarOpen(false)} />
       )}
 
-      {/* Sidebar - Fixed on mobile/tablet, Static on desktop */}
       <div className={`
-        fixed lg:static inset-y-0 left-0 z-30 
+        fixed lg:static inset-y-0 left-0 z-30
         transform transition-transform duration-300 ease-in-out
         ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0 lg:w-0 lg:overflow-hidden'}
-        ${isSidebarOpen && 'lg:w-64'} 
+        ${isSidebarOpen && 'lg:w-64'}
       `}>
         <Sidebar
+          view={view}
+          setView={(v) => { setView(v); setOpenProjectId(null); }}
+          openProjectId={openProjectId}
+          pendingByProject={pendingByProject}
+          overdueByProject={overdueByProject}
+          todayCount={todayCount}
+          overdueCount={overdueCount}
           categories={categories}
           projects={projects}
           selectedUrgency={selectedUrgency}
           setSelectedUrgency={setSelectedUrgency}
           selectedCategory={selectedCategory}
           setSelectedCategory={setSelectedCategory}
-          selectedProject={selectedProject}
-          setSelectedProject={setSelectedProject}
           addCategory={addCategory}
           deleteCategory={deleteCategory}
           addProject={addProject}
@@ -473,135 +428,143 @@ const App: React.FC = () => {
           onOpenProject={(id) => setOpenProjectId(id)}
           onOpenHistory={() => setIsHistoryOpen(true)}
           onClose={() => setIsSidebarOpen(false)}
+          onQuickAdd={() => openQuickAdd()}
         />
       </div>
 
       <main className="flex-1 flex flex-col min-w-0 w-full relative">
-        <header className="border-b bg-white flex flex-col md:flex-row md:items-center justify-between px-4 py-3 md:px-6 md:h-16 gap-4 flex-shrink-0 z-10">
-          <div className="flex flex-col md:flex-row md:items-center gap-4 flex-1">
+        <header className="border-b bg-white flex flex-col md:flex-row md:items-center justify-between px-3 py-3 md:px-5 md:h-16 gap-3 flex-shrink-0 z-10">
+          <div className="flex flex-col md:flex-row md:items-center gap-3 flex-1">
             <div className="flex items-center justify-between w-full md:w-auto">
               <div className="flex items-center gap-2">
-                {/* Sidebar Toggle */}
                 <button
                   onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                  className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors md:hidden"
+                  className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 md:hidden"
                   title="Menu"
                 >
                   <Menu className="w-5 h-5" />
                 </button>
                 <button
                   onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                  className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors hidden md:block"
-                  title={isSidebarOpen ? 'Ocultar barra lateral' : 'Mostrar barra lateral'}
+                  className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 hidden md:block"
+                  title="Toggle"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                  </svg>
-                </button>
-              </div>
-
-              {/* View Toggle on Mobile */}
-              <div className="flex md:hidden items-center bg-slate-100 p-1 rounded-lg">
-                <button
-                  onClick={() => changeWeek(-1)}
-                  className="p-1.5 hover:bg-white hover:shadow-sm rounded transition-all"
-                >
-                  <ChevronLeft className="w-4 h-4 text-slate-600" />
-                </button>
-                <span className="text-xs font-bold text-slate-600 px-2 min-w-[80px] text-center">
-                  {currentWeekStart.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}
-                </span>
-                <button
-                  onClick={() => changeWeek(1)}
-                  className="p-1.5 hover:bg-white hover:shadow-sm rounded transition-all"
-                >
-                  <ChevronRight className="w-4 h-4 text-slate-600" />
+                  <Menu className="w-5 h-5" />
                 </button>
               </div>
             </div>
 
-            {/* Search Bar - Full width on mobile */}
-            <div className="relative w-full md:max-w-md">
+            <div className="relative w-full md:max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
               <input
                 type="text"
-                placeholder="Buscar tarefas..."
-                className="w-full pl-10 pr-4 py-2 bg-slate-100 border-transparent focus:bg-white focus:border-blue-500 rounded-lg text-sm transition-all outline-none"
+                placeholder="Buscar em todas as tarefas..."
+                className="w-full pl-10 pr-4 py-2 bg-slate-100 border-transparent focus:bg-white focus:border-blue-500 rounded-lg text-sm outline-none"
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={e => setSearchTerm(e.target.value)}
               />
             </div>
 
-            {/* Week Navigation */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-lg">
-              <button onClick={() => changeWeek(-1)} className="p-1 hover:bg-white hover:shadow-sm rounded transition-all">
-                <ChevronLeft className="w-4 h-4 text-slate-600" />
-              </button>
-              <div className="px-2 md:px-3 flex items-center space-x-1 md:space-x-2 text-[10px] md:text-xs font-bold text-slate-600">
-                <CalendarIcon className="w-3 h-3 hidden sm:block" />
-                <span className="whitespace-nowrap">Semana de {currentWeekStart.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}</span>
+            {view === 'week' && !openProjectId && (
+              <div className="flex items-center bg-slate-100 p-1 rounded-lg">
+                <button onClick={() => changeWeek(-1)} className="p-1 hover:bg-white rounded">
+                  <ChevronLeft className="w-4 h-4 text-slate-600" />
+                </button>
+                <div className="px-2 md:px-3 flex items-center gap-1 text-[10px] md:text-xs font-bold text-slate-600">
+                  <CalendarIcon className="w-3 h-3 hidden sm:block" />
+                  <span className="whitespace-nowrap">
+                    {currentWeekStart.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' })}
+                  </span>
+                </div>
+                <button onClick={() => changeWeek(1)} className="p-1 hover:bg-white rounded">
+                  <ChevronRight className="w-4 h-4 text-slate-600" />
+                </button>
+                <button
+                  onClick={() => setCurrentWeekStart(getStartOfWeek(new Date()))}
+                  className="ml-1 px-2 py-1 text-[10px] bg-white text-blue-600 rounded border shadow-sm hover:bg-blue-50"
+                >
+                  Hoje
+                </button>
               </div>
-              <button onClick={() => changeWeek(1)} className="p-1 hover:bg-white hover:shadow-sm rounded transition-all">
-                <ChevronRight className="w-4 h-4 text-slate-600" />
-              </button>
-              <button
-                onClick={() => setCurrentWeekStart(getStartOfWeek(new Date()))}
-                className="ml-1 md:ml-2 px-2 py-1 text-[10px] bg-white text-blue-600 rounded border shadow-sm hover:bg-blue-50"
-              >
-                Hoje
-              </button>
-            </div>
+            )}
           </div>
 
-          <div className="flex items-center gap-2 md:gap-3 md:ml-4 justify-end">
-            {view === 'calendar' ? (
-              <button
-                onClick={() => setView('week')}
-                className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap"
-              >
-                <LayoutDashboard className="w-4 h-4" />
-                <span className="hidden sm:inline">Kanban</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => setView('calendar')}
-                className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap"
-              >
-                <CalendarIcon className="w-4 h-4" />
-                <span className="hidden sm:inline">Calendário</span>
-              </button>
-            )}
+          <div className="flex items-center gap-2 justify-end">
+            <button
+              onClick={() => openQuickAdd()}
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg"
+              title="Cmd+K"
+            >
+              <kbd className="px-1.5 py-0.5 bg-slate-100 rounded text-[10px] font-mono">⌘K</kbd>
+            </button>
 
-
-            {/* Logout Button */}
             <button
               onClick={async () => {
-                if (confirm('Deseja sair?')) {
+                if (confirm('Sair?')) {
                   const { signOut } = await import('./lib/supabase');
                   await signOut();
                   setIsAuthenticated(false);
                   setTasks([]);
                   setCategories(DEFAULT_CATEGORIES);
+                  setProjects([]);
                 }
               }}
-              className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors whitespace-nowrap"
+              className="px-3 py-2 text-sm font-medium text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg"
             >
               Sair
             </button>
 
             <button
-              onClick={() => { setEditingTask(null); setIsTaskModalOpen(true); }}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 md:px-4 rounded-lg text-sm font-medium flex items-center shadow-sm transition-colors whitespace-nowrap"
+              onClick={() => openQuickAdd()}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 md:px-4 rounded-lg text-sm font-bold flex items-center shadow-sm"
             >
-              <Plus className="w-4 h-4 md:mr-2" />
-              <span className="hidden md:inline">Nova Tarefa</span>
-              <span className="md:hidden">Nova</span>
+              <Plus className="w-4 h-4 md:mr-1.5" />
+              <span className="hidden md:inline">Nova</span>
             </button>
           </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6">
-          {view === 'calendar' ? (
+          {openedProject ? (
+            <div className="-m-4 md:-m-6 h-[calc(100%+2rem)] md:h-[calc(100%+3rem)]">
+              <ProjectBoard
+                project={openedProject}
+                tasks={tasks}
+                categories={categories}
+                projects={projects}
+                onBack={() => setOpenProjectId(null)}
+                onAddTask={(data) => addTask({
+                  ...data,
+                  projectId: openedProject.id,
+                  dayOfWeek: 'inbox',
+                })}
+                onUpdateTask={updateTask}
+                onCompleteTask={completeTask}
+                onTaskClick={(task) => openTaskModal(task)}
+                onDeleteProject={() => deleteProject(openedProject.id)}
+                onEditProject={(updates) => updateProject(openedProject.id, updates)}
+              />
+            </div>
+          ) : view === 'today' ? (
+            <TodayView
+              tasks={tasks}
+              categories={categories}
+              projects={projects}
+              onTaskClick={(task) => openTaskModal(task)}
+              onCompleteTask={completeTask}
+              onChangeStatus={changeStatus}
+              onOpenProject={(id) => setOpenProjectId(id)}
+              onQuickAdd={() => openQuickAdd({ date: today })}
+            />
+          ) : view === 'dashboard' ? (
+            <Dashboard
+              tasks={tasks}
+              categories={categories}
+              projects={projects}
+              onOpenProject={(id) => setOpenProjectId(id)}
+              onTaskClick={(task) => openTaskModal(task)}
+            />
+          ) : view === 'calendar' ? (
             <CalendarView tasks={calendarTasks as any} projects={projects} onDayClick={handleDayClick} />
           ) : (
             <DragDropContext onDragEnd={onDragEnd}>
@@ -610,22 +573,55 @@ const App: React.FC = () => {
                 categories={categories}
                 projects={projects}
                 weekColumns={weekColumns}
-                onTaskClick={(task) => { setEditingTask(task); setIsTaskModalOpen(true); }}
+                onTaskClick={(task) => openTaskModal(task)}
                 onCompleteTask={completeTask}
+                onChangeStatus={changeStatus}
+                onQuickAddForDate={(date) => openQuickAdd({ date })}
               />
             </DragDropContext>
           )}
         </div>
+
+        {/* FAB mobile */}
+        <button
+          onClick={() => openQuickAdd()}
+          className="md:hidden fixed bottom-6 right-6 z-30 w-14 h-14 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg shadow-blue-500/40 flex items-center justify-center"
+        >
+          <Sparkles className="w-6 h-6" />
+        </button>
       </main>
 
+      {/* Modais */}
       {isTaskModalOpen && (
         <TaskModal
           task={editingTask}
           categories={categories}
           projects={projects}
-          onClose={() => { setIsTaskModalOpen(false); setEditingTask(null); }}
-          onSave={(data) => editingTask ? updateTask(editingTask.id, data) : addTask(data)}
-          onDelete={(id) => setTasks(prev => prev.filter(t => t.id !== id))}
+          defaultProjectId={taskModalDefaults.projectId}
+          defaultStatus={taskModalDefaults.status}
+          onClose={() => { setIsTaskModalOpen(false); setEditingTask(null); setTaskModalDefaults({}); }}
+          onSave={(data) => {
+            if (editingTask) {
+              updateTask(editingTask.id, data);
+            } else {
+              addTask(data);
+            }
+            setIsTaskModalOpen(false);
+            setEditingTask(null);
+            setTaskModalDefaults({});
+          }}
+          onDelete={(id) => deleteTaskById(id)}
+        />
+      )}
+
+      {isQuickAddOpen && (
+        <QuickAdd
+          categories={categories}
+          projects={projects}
+          defaultProjectId={quickAddDefaults.projectId}
+          defaultDate={quickAddDefaults.date}
+          onClose={() => { setIsQuickAddOpen(false); setQuickAddDefaults({}); }}
+          onSubmit={(data) => { addTask(data); }}
         />
       )}
 
@@ -635,27 +631,9 @@ const App: React.FC = () => {
           categories={categories}
           onClose={() => setIsHistoryOpen(false)}
           onRestore={restoreTask}
-          onPermanentDelete={(id) => setTasks(prev => prev.filter(t => t.id !== id))}
+          onPermanentDelete={(id) => deleteTaskById(id)}
         />
       )}
-
-      {openProjectId && (() => {
-        const proj = projects.find(p => p.id === openProjectId);
-        if (!proj) return null;
-        return (
-          <ProjectDetail
-            project={proj}
-            tasks={tasks}
-            onClose={() => setOpenProjectId(null)}
-            onAddStep={(data) => addStepToProject(openProjectId, data)}
-            onDeleteStep={(id) => {
-              deleteTaskFromStorage(id);
-              setTasks(prev => prev.filter(t => t.id !== id));
-            }}
-            onCompleteStep={completeTask}
-          />
-        );
-      })()}
     </div>
   );
 };

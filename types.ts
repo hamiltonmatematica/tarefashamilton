@@ -8,6 +8,10 @@ export enum Urgency {
 
 export type DayOfWeek = 'inbox' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 
+export type TaskStatus = 'backlog' | 'todo' | 'doing' | 'blocked' | 'done';
+
+export type Recurrence = 'none' | 'daily' | 'weekdays' | 'weekly' | 'monthly';
+
 export interface Category {
   id: string;
   name: string;
@@ -20,6 +24,12 @@ export interface TaskAttachment {
   name: string;
   type: 'image' | 'pdf' | 'other';
   size?: number;
+}
+
+export interface ChecklistItem {
+  id: string;
+  text: string;
+  done: boolean;
 }
 
 export interface Project {
@@ -36,19 +46,25 @@ export interface Task {
   title: string;
   description: string;
   urgency: Urgency;
-  category: string; // Category ID
-  projectId?: string; // Optional link to a project
+  status: TaskStatus;
+  category: string;
+  projectId?: string;
   dayOfWeek: DayOfWeek;
-  scheduledDate?: string; // YYYY-MM-DD
+  scheduledDate?: string;
+  dueDate?: string;
   position: number;
   notes: string;
+  checklist: ChecklistItem[];
+  recurrence: Recurrence;
   isCompleted: boolean;
   completedAt?: string;
-  deletedAt?: string; // For 30-day trash retention
-  attachments: TaskAttachment[]; // Images, PDFs, etc
+  deletedAt?: string;
+  attachments: TaskAttachment[];
   createdAt: string;
   updatedAt?: string;
 }
+
+export type View = 'today' | 'dashboard' | 'week' | 'calendar' | 'project';
 
 export interface AppState {
   tasks: Task[];

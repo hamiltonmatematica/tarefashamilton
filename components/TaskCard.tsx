@@ -1,7 +1,7 @@
 import React from 'react';
-import { Circle, FileText, Image as ImageIcon } from 'lucide-react';
-import { Task, Category, Project } from '../types';
-import { URGENCY_CONFIG } from '../constants';
+import { Circle, FileText, Image as ImageIcon, Calendar, CheckSquare, AlertCircle, Repeat } from 'lucide-react';
+import { Task, Category, Project, TaskStatus } from '../types';
+import { URGENCY_CONFIG, STATUS_CONFIG, isOverdue, formatPrettyDate, isToday } from '../constants';
 
 interface TaskCardProps {
   task: Task;
@@ -9,22 +9,49 @@ interface TaskCardProps {
   project?: Project;
   onClick: () => void;
   onComplete: () => void;
+  onChangeStatus?: (status: TaskStatus) => void;
+  compact?: boolean;
 }
 
-const TaskCard: React.FC<TaskCardProps> = ({ task, category, project, onClick, onComplete }) => {
+const TaskCard: React.FC<TaskCardProps> = ({ task, category, project, onClick, onComplete, onChangeStatus, compact }) => {
   const urgencyStyle = URGENCY_CONFIG[task.urgency];
+  const statusStyle = STATUS_CONFIG[task.status || 'todo'];
+  const dueDate = task.dueDate || task.scheduledDate;
+  const overdue = !task.isCompleted && isOverdue(dueDate);
+  const dueToday = !task.isCompleted && isToday(dueDate);
+
+  const checklist = task.checklist || [];
+  const checklistDone = checklist.filter(c => c.done).length;
+  const checklistTotal = checklist.length;
+  const checklistProgress = checklistTotal > 0 ? Math.round((checklistDone / checklistTotal) * 100) : 0;
+
+  const handleStatusCycle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!onChangeStatus) return;
+    const order: TaskStatus[] = ['todo', 'doing', 'done'];
+    const current = task.status || 'todo';
+    const idx = order.indexOf(current);
+    const next = order[(idx + 1) % order.length];
+    if (next === 'done') {
+      onComplete();
+    } else {
+      onChangeStatus(next);
+    }
+  };
 
   return (
     <div
-      className="group relative bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer overflow-hidden"
+      className={`group relative bg-white border rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer overflow-hidden ${
+        overdue ? 'border-rose-300' : 'border-slate-200'
+      } ${compact ? 'p-3' : 'p-4'}`}
       onClick={onClick}
     >
-      {/* Priority Bar */}
       <div className={`absolute left-0 top-0 bottom-0 w-1 ${urgencyStyle?.color || 'bg-gray-500'}`} />
 
-      <div className="flex flex-col space-y-3">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center space-x-2 overflow-hidden">
+      <div className="flex flex-col space-y-2">
+        {/* Top row: tags */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-1.5 overflow-hidden flex-wrap">
             {project ? (
               <span
                 className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider truncate"
@@ -40,40 +67,79 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, category, project, onClick, o
                 {category.name}
               </span>
             ) : null}
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${urgencyStyle?.bg || 'bg-gray-50'} ${urgencyStyle?.text || 'text-gray-700'}`}>
-              {urgencyStyle?.label || task.urgency}
-            </span>
+
+            {/* Status badge */}
+            {task.status && task.status !== 'todo' && (
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${statusStyle.bg} ${statusStyle.text}`}>
+                {statusStyle.label}
+              </span>
+            )}
+
+            {task.recurrence && task.recurrence !== 'none' && (
+              <span className="text-[10px] text-slate-400" title="Tarefa recorrente">
+                <Repeat className="w-3 h-3" />
+              </span>
+            )}
           </div>
+
           <button
-            onClick={(e) => { e.stopPropagation(); onComplete(); }}
-            className="text-slate-300 hover:text-green-500 transition-colors"
+            onClick={handleStatusCycle}
+            className="text-slate-300 hover:text-emerald-500 transition-colors flex-shrink-0"
+            title="Avançar status (Todo → Doing → Done)"
           >
             <Circle className="w-5 h-5" />
           </button>
         </div>
 
-        <h4 className="font-semibold text-slate-800 text-sm leading-tight line-clamp-2">
+        {/* Title */}
+        <h4 className={`font-semibold text-slate-800 leading-tight ${compact ? 'text-sm line-clamp-2' : 'text-sm line-clamp-3'}`}>
           {task.title}
         </h4>
 
-        <div className="flex items-center justify-between mt-auto">
-          <div className="flex items-center space-x-3 text-slate-400">
-            {task.notes && (
-              <div className="flex items-center">
-                <FileText className="w-3 h-3 mr-1" />
+        {/* Checklist progress */}
+        {checklistTotal > 0 && (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[10px] text-slate-500">
+              <span className="flex items-center gap-1">
+                <CheckSquare className="w-3 h-3" />
+                {checklistDone}/{checklistTotal}
+              </span>
+              <span className="font-bold">{checklistProgress}%</span>
+            </div>
+            <div className="w-full bg-slate-100 rounded-full h-1 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${checklistProgress === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                style={{ width: `${checklistProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Bottom: meta */}
+        <div className="flex items-center justify-between mt-1">
+          <div className="flex items-center gap-2.5 text-slate-400">
+            {dueDate && (
+              <div className={`flex items-center gap-1 ${overdue ? 'text-rose-600 font-bold' : dueToday ? 'text-blue-600 font-bold' : ''}`}>
+                {overdue ? <AlertCircle className="w-3 h-3" /> : <Calendar className="w-3 h-3" />}
+                <span className="text-[10px]">
+                  {overdue ? 'Atrasada · ' : ''}{formatPrettyDate(dueDate)}
+                </span>
               </div>
+            )}
+            {(task.notes || task.description) && (
+              <FileText className="w-3 h-3" />
             )}
             {task.attachments && task.attachments.length > 0 && (
               <div className="flex items-center">
-                <ImageIcon className="w-3 h-3 mr-1" />
+                <ImageIcon className="w-3 h-3 mr-0.5" />
                 <span className="text-[10px]">{task.attachments.length}</span>
               </div>
             )}
           </div>
 
-          <div className="text-[10px] text-slate-400 font-medium italic">
-            #{task.position + 1}
-          </div>
+          <span className={`text-[9px] font-bold ${urgencyStyle?.text || 'text-slate-500'}`}>
+            {urgencyStyle?.label || task.urgency}
+          </span>
         </div>
       </div>
     </div>
