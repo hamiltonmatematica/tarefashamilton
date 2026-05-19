@@ -563,6 +563,8 @@ const App: React.FC = () => {
               projects={projects}
               onOpenProject={(id) => setOpenProjectId(id)}
               onTaskClick={(task) => openTaskModal(task)}
+              onCompleteTask={completeTask}
+              onChangeStatus={changeStatus}
             />
           ) : view === 'calendar' ? (
             <CalendarView tasks={calendarTasks as any} projects={projects} onDayClick={handleDayClick} />

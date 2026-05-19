@@ -1,7 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { TrendingUp, AlertTriangle, CheckCircle2, BarChart3, Calendar, FolderKanban, Activity, ArrowUpRight } from 'lucide-react';
-import { Task, Category, Project } from '../types';
+import { Task, Category, Project, TaskStatus } from '../types';
 import { URGENCY_CONFIG, todayISO, isOverdue, formatPrettyDate, parseLocalDate, formatDate } from '../constants';
+import TaskListModal from './TaskListModal';
+
+type KpiFilter = 'pending' | 'overdue' | 'doing' | 'completed';
 
 interface DashboardProps {
   tasks: Task[];
@@ -9,10 +12,13 @@ interface DashboardProps {
   projects: Project[];
   onOpenProject: (id: string) => void;
   onTaskClick: (task: Task) => void;
+  onCompleteTask: (id: string) => void;
+  onChangeStatus: (id: string, status: TaskStatus) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ tasks, categories, projects, onOpenProject, onTaskClick }) => {
+const Dashboard: React.FC<DashboardProps> = ({ tasks, categories, projects, onOpenProject, onTaskClick, onCompleteTask, onChangeStatus }) => {
   const today = todayISO();
+  const [activeFilter, setActiveFilter] = useState<KpiFilter | null>(null);
 
   const stats = useMemo(() => {
     const pending = tasks.filter(t => !t.isCompleted);
@@ -119,6 +125,7 @@ const Dashboard: React.FC<DashboardProps> = ({ tasks, categories, projects, onOp
           value={stats.pending}
           icon={<Activity className="w-5 h-5" />}
           color="blue"
+          onClick={() => setActiveFilter('pending')}
         />
         <KpiCard
           label="Atrasadas"
@@ -126,18 +133,21 @@ const Dashboard: React.FC<DashboardProps> = ({ tasks, categories, projects, onOp
           icon={<AlertTriangle className="w-5 h-5" />}
           color="rose"
           urgent={stats.overdue > 0}
+          onClick={() => setActiveFilter('overdue')}
         />
         <KpiCard
           label="Em Andamento"
           value={stats.byStatus.doing}
           icon={<TrendingUp className="w-5 h-5" />}
           color="amber"
+          onClick={() => setActiveFilter('doing')}
         />
         <KpiCard
           label="Concluídas (total)"
           value={stats.completed}
           icon={<CheckCircle2 className="w-5 h-5" />}
           color="emerald"
+          onClick={() => setActiveFilter('completed')}
         />
       </div>
 
@@ -310,6 +320,59 @@ const Dashboard: React.FC<DashboardProps> = ({ tasks, categories, projects, onOp
           </div>
         </div>
       )}
+
+      {/* Modal de filtro KPI */}
+      {activeFilter && (() => {
+        const filterConfigs: Record<KpiFilter, { title: string; subtitle: string; color: string; tasks: Task[] }> = {
+          pending: {
+            title: 'Todas as Tarefas Pendentes',
+            subtitle: `${stats.pending} pendente${stats.pending !== 1 ? 's' : ''} no momento`,
+            color: '#3b82f6',
+            tasks: tasks.filter(t => !t.isCompleted).sort((a, b) => {
+              const aOver = isOverdue(a.dueDate || a.scheduledDate);
+              const bOver = isOverdue(b.dueDate || b.scheduledDate);
+              if (aOver !== bOver) return aOver ? -1 : 1;
+              return (a.dueDate || a.scheduledDate || '9999') > (b.dueDate || b.scheduledDate || '9999') ? 1 : -1;
+            }),
+          },
+          overdue: {
+            title: 'Tarefas Atrasadas',
+            subtitle: `${stats.overdue} precisam de ação imediata`,
+            color: '#f43f5e',
+            tasks: tasks.filter(t => !t.isCompleted && isOverdue(t.dueDate || t.scheduledDate))
+              .sort((a, b) => (a.dueDate || a.scheduledDate || '').localeCompare(b.dueDate || b.scheduledDate || '')),
+          },
+          doing: {
+            title: 'Tarefas Em Andamento',
+            subtitle: `${stats.byStatus.doing} sendo trabalhada${stats.byStatus.doing !== 1 ? 's' : ''}`,
+            color: '#f59e0b',
+            tasks: tasks.filter(t => !t.isCompleted && t.status === 'doing'),
+          },
+          completed: {
+            title: 'Tarefas Concluídas',
+            subtitle: `${stats.completed} no histórico (últimos 30 dias)`,
+            color: '#10b981',
+            tasks: tasks.filter(t => t.isCompleted)
+              .sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || '')),
+          },
+        };
+        const cfg = filterConfigs[activeFilter];
+        return (
+          <TaskListModal
+            title={cfg.title}
+            subtitle={cfg.subtitle}
+            accentColor={cfg.color}
+            tasks={cfg.tasks}
+            categories={categories}
+            projects={projects}
+            groupByProject={activeFilter === 'pending' || activeFilter === 'overdue'}
+            onClose={() => setActiveFilter(null)}
+            onTaskClick={(task) => { onTaskClick(task); setActiveFilter(null); }}
+            onCompleteTask={onCompleteTask}
+            onChangeStatus={onChangeStatus}
+          />
+        );
+      })()}
     </div>
   );
 };
@@ -320,9 +383,10 @@ interface KpiCardProps {
   icon: React.ReactNode;
   color: 'blue' | 'rose' | 'emerald' | 'amber';
   urgent?: boolean;
+  onClick?: () => void;
 }
 
-const KpiCard: React.FC<KpiCardProps> = ({ label, value, icon, color, urgent }) => {
+const KpiCard: React.FC<KpiCardProps> = ({ label, value, icon, color, urgent, onClick }) => {
   const colorMap = {
     blue: 'from-blue-500 to-indigo-600',
     rose: 'from-rose-500 to-red-600',
@@ -330,14 +394,25 @@ const KpiCard: React.FC<KpiCardProps> = ({ label, value, icon, color, urgent }) 
     amber: 'from-amber-500 to-orange-600',
   };
 
+  const clickable = !!onClick;
+
   return (
-    <div className={`bg-gradient-to-br ${colorMap[color]} rounded-2xl p-4 md:p-5 text-white shadow-sm ${urgent ? 'animate-pulse-slow' : ''}`}>
+    <button
+      onClick={onClick}
+      disabled={!clickable}
+      className={`bg-gradient-to-br ${colorMap[color]} rounded-2xl p-4 md:p-5 text-white shadow-sm text-left w-full ${
+        urgent ? 'animate-pulse-slow' : ''
+      } ${clickable ? 'hover:shadow-lg hover:scale-[1.02] cursor-pointer transition-all' : 'cursor-default'}`}
+    >
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold uppercase tracking-wider text-white/80">{label}</span>
         <span className="opacity-80">{icon}</span>
       </div>
       <div className="text-3xl md:text-4xl font-bold">{value}</div>
-    </div>
+      {clickable && value > 0 && (
+        <div className="mt-1 text-[10px] text-white/60 font-medium">Clique para ver →</div>
+      )}
+    </button>
   );
 };
 
