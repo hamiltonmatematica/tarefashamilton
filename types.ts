@@ -8,7 +8,9 @@ export enum Urgency {
 
 export type DayOfWeek = 'inbox' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 
-export type TaskStatus = 'backlog' | 'todo' | 'doing' | 'blocked' | 'done';
+export type NativeTaskStatus = 'backlog' | 'todo' | 'doing' | 'blocked' | 'done';
+// TaskStatus aceita os nativos OU um id UUID de status customizado
+export type TaskStatus = NativeTaskStatus | string;
 
 export type Recurrence = 'none' | 'daily' | 'weekdays' | 'weekly' | 'monthly';
 

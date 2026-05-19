@@ -1,9 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { Plus, ArrowLeft, Settings, Trash2, Calendar, AlertCircle, MoreVertical, X } from 'lucide-react';
+import { Plus, ArrowLeft, Settings, Trash2, AlertCircle, X, HelpCircle, Layers } from 'lucide-react';
 import { Project, Task, Category, TaskStatus, Urgency } from '../types';
-import { STATUS_CONFIG, STATUS_ORDER, URGENCY_CONFIG, isOverdue, formatPrettyDate } from '../constants';
+import { STATUS_CONFIG, NATIVE_STATUS_ORDER, isOverdue, CustomStatus, loadCustomStatuses, saveCustomStatuses, buildAllStatuses } from '../constants';
 import TaskCard from './TaskCard';
+import Tooltip from './Tooltip';
+import StatusManager from './StatusManager';
 
 interface ProjectBoardProps {
   project: Project;
@@ -20,44 +22,50 @@ interface ProjectBoardProps {
 }
 
 const ProjectBoard: React.FC<ProjectBoardProps> = ({
-  project,
-  tasks,
-  categories,
-  projects,
-  onBack,
-  onAddTask,
-  onUpdateTask,
-  onCompleteTask,
-  onTaskClick,
-  onDeleteProject,
-  onEditProject,
+  project, tasks, categories, projects,
+  onBack, onAddTask, onUpdateTask, onCompleteTask, onTaskClick,
+  onDeleteProject, onEditProject,
 }) => {
-  const [quickAddCol, setQuickAddCol] = useState<TaskStatus | null>(null);
+  const [quickAddCol, setQuickAddCol] = useState<string | null>(null);
   const [quickAddText, setQuickAddText] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [showStatusManager, setShowStatusManager] = useState(false);
+  const [customStatuses, setCustomStatuses] = useState<CustomStatus[]>([]);
   const [editName, setEditName] = useState(project.name);
   const [editColor, setEditColor] = useState(project.color);
   const [editDescription, setEditDescription] = useState(project.description);
 
+  useEffect(() => {
+    setCustomStatuses(loadCustomStatuses());
+  }, []);
+
+  const allStatuses = useMemo(() => buildAllStatuses(customStatuses), [customStatuses]);
+
   const projectTasks = useMemo(() => tasks.filter(t => t.projectId === project.id), [tasks, project.id]);
 
   const tasksByStatus = useMemo(() => {
-    const map: Record<TaskStatus, Task[]> = {
-      backlog: [], todo: [], doing: [], blocked: [], done: [],
-    };
+    const map: Record<string, Task[]> = {};
+    allStatuses.forEach(s => { map[s.id] = []; });
+
     projectTasks.forEach(t => {
-      const status = t.isCompleted ? 'done' : (t.status || 'todo');
-      map[status].push(t);
+      const statusKey = t.isCompleted ? 'done' : (t.status || 'todo');
+      if (map[statusKey]) {
+        map[statusKey].push(t);
+      } else {
+        // Status órfão (custom apagado) → manda pra "A Fazer"
+        map['todo'] = map['todo'] || [];
+        map['todo'].push(t);
+      }
     });
-    // Ordena por position dentro da coluna
-    (Object.keys(map) as TaskStatus[]).forEach(s => {
-      map[s].sort((a, b) => a.position - b.position);
+
+    Object.keys(map).forEach(k => {
+      map[k].sort((a, b) => a.position - b.position);
     });
     return map;
-  }, [projectTasks]);
+  }, [projectTasks, allStatuses]);
 
   const totalTasks = projectTasks.length;
-  const doneCount = tasksByStatus.done.length;
+  const doneCount = tasksByStatus.done?.length || 0;
   const progress = totalTasks > 0 ? Math.round((doneCount / totalTasks) * 100) : 0;
   const overdueCount = projectTasks.filter(t => !t.isCompleted && isOverdue(t.dueDate || t.scheduledDate)).length;
 
@@ -66,11 +74,11 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({
     if (!destination) return;
     if (source.droppableId === destination.droppableId && source.index === destination.index) return;
 
-    const newStatus = destination.droppableId as TaskStatus;
+    const newStatus = destination.droppableId;
     const task = projectTasks.find(t => t.id === draggableId);
     if (!task) return;
 
-    const updates: Partial<Task> = { status: newStatus };
+    const updates: Partial<Task> = { status: newStatus as TaskStatus };
     if (newStatus === 'done') {
       updates.isCompleted = true;
       updates.completedAt = new Date().toISOString();
@@ -82,18 +90,23 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({
     onUpdateTask(draggableId, updates);
   };
 
-  const handleQuickAdd = (status: TaskStatus) => {
+  const handleQuickAdd = (status: string) => {
     if (!quickAddText.trim()) {
       setQuickAddCol(null);
       return;
     }
-    onAddTask({ title: quickAddText.trim(), status });
+    onAddTask({ title: quickAddText.trim(), status: status as TaskStatus });
     setQuickAddText('');
   };
 
   const handleSaveSettings = () => {
     onEditProject({ name: editName, color: editColor, description: editDescription });
     setShowSettings(false);
+  };
+
+  const handleSaveStatuses = (list: CustomStatus[]) => {
+    saveCustomStatuses(list);
+    setCustomStatuses(list);
   };
 
   return (
@@ -135,6 +148,14 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          <Tooltip content="Adicione, edite ou remova colunas de status (ex: 'Aguardando Aprovação', 'Em Revisão')" title="Gerenciar Status" position="bottom" width="md">
+            <button
+              onClick={() => setShowStatusManager(true)}
+              className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors"
+            >
+              <Layers className="w-5 h-5" />
+            </button>
+          </Tooltip>
           <button
             onClick={() => {
               setEditName(project.name);
@@ -166,29 +187,45 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({
       <div className="flex-1 overflow-x-auto overflow-y-hidden p-4 md:p-6">
         <DragDropContext onDragEnd={handleDragEnd}>
           <div className="flex gap-4 h-full min-w-max">
-            {STATUS_ORDER.map(status => {
-              const cfg = STATUS_CONFIG[status];
-              const colTasks = tasksByStatus[status];
+            {allStatuses.map(({ id, cfg, isNative }) => {
+              const customColor = (cfg as any).customColor as string | undefined;
+              const colTasks = tasksByStatus[id] || [];
+              const dotStyle = isNative ? '' : '';
+
               return (
-                <div key={status} className="w-72 md:w-80 flex flex-col flex-shrink-0">
+                <div key={id} className="w-72 md:w-80 flex flex-col flex-shrink-0">
                   <div className="flex items-center justify-between mb-3 px-1">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${cfg.color}`} />
-                      <h3 className="font-bold text-sm text-slate-700">{cfg.label}</h3>
-                      <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {isNative ? (
+                        <div className={`w-2 h-2 rounded-full ${cfg.color} flex-shrink-0`} />
+                      ) : (
+                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: customColor }} />
+                      )}
+                      <Tooltip
+                        title={cfg.label}
+                        content={cfg.description}
+                        position="bottom"
+                        width="md"
+                      >
+                        <h3 className="font-bold text-sm text-slate-700 cursor-help truncate flex items-center gap-1">
+                          {cfg.label}
+                          <HelpCircle className="w-3 h-3 text-slate-300" />
+                        </h3>
+                      </Tooltip>
+                      <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0">
                         {colTasks.length}
                       </span>
                     </div>
                     <button
-                      onClick={() => setQuickAddCol(quickAddCol === status ? null : status)}
-                      className="p-1 hover:bg-slate-100 rounded text-slate-500"
+                      onClick={() => setQuickAddCol(quickAddCol === id ? null : id)}
+                      className="p-1 hover:bg-slate-100 rounded text-slate-500 flex-shrink-0"
                       title="Adicionar tarefa"
                     >
                       <Plus className="w-4 h-4" />
                     </button>
                   </div>
 
-                  <Droppable droppableId={status}>
+                  <Droppable droppableId={id}>
                     {(provided, snapshot) => (
                       <div
                         ref={provided.innerRef}
@@ -197,7 +234,7 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({
                           snapshot.isDraggingOver ? 'bg-blue-50/60 outline outline-2 outline-dashed outline-blue-300' : 'bg-slate-100/40'
                         }`}
                       >
-                        {quickAddCol === status && (
+                        {quickAddCol === id && (
                           <div className="mb-2 bg-white rounded-lg p-2 border border-blue-200 shadow-sm">
                             <textarea
                               placeholder="Título da tarefa..."
@@ -207,7 +244,7 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({
                               onKeyDown={e => {
                                 if (e.key === 'Enter' && !e.shiftKey) {
                                   e.preventDefault();
-                                  handleQuickAdd(status);
+                                  handleQuickAdd(id);
                                 }
                                 if (e.key === 'Escape') {
                                   setQuickAddCol(null);
@@ -219,7 +256,7 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({
                             />
                             <div className="flex gap-2 mt-2">
                               <button
-                                onClick={() => handleQuickAdd(status)}
+                                onClick={() => handleQuickAdd(id)}
                                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1.5 rounded"
                               >
                                 Adicionar
@@ -260,9 +297,9 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({
                           ))}
                           {provided.placeholder}
 
-                          {colTasks.length === 0 && quickAddCol !== status && (
+                          {colTasks.length === 0 && quickAddCol !== id && (
                             <button
-                              onClick={() => setQuickAddCol(status)}
+                              onClick={() => setQuickAddCol(id)}
                               className="w-full py-6 text-xs text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg border-2 border-dashed border-slate-200 hover:border-blue-300 transition-all"
                             >
                               + Adicionar tarefa
@@ -275,6 +312,17 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({
                 </div>
               );
             })}
+
+            {/* Botão para adicionar status */}
+            <div className="w-72 md:w-80 flex-shrink-0 flex items-start pt-7">
+              <button
+                onClick={() => setShowStatusManager(true)}
+                className="w-full py-4 text-sm text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl border-2 border-dashed border-slate-200 hover:border-indigo-300 transition-all flex items-center justify-center gap-2 font-semibold"
+              >
+                <Plus className="w-4 h-4" />
+                Novo status
+              </button>
+            </div>
           </div>
         </DragDropContext>
       </div>
@@ -345,6 +393,15 @@ const ProjectBoard: React.FC<ProjectBoardProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Status Manager Modal */}
+      {showStatusManager && (
+        <StatusManager
+          customStatuses={customStatuses}
+          onSave={handleSaveStatuses}
+          onClose={() => setShowStatusManager(false)}
+        />
       )}
     </div>
   );

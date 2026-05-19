@@ -4,7 +4,7 @@ import {
   CheckSquare, Square, Repeat, Flag, Tag, FolderKanban, AlertCircle, GripVertical
 } from 'lucide-react';
 import { Task, Category, Urgency, TaskAttachment, Project, ChecklistItem, TaskStatus, Recurrence } from '../types';
-import { URGENCY_CONFIG, STATUS_CONFIG, STATUS_ORDER, RECURRENCE_LABELS } from '../constants';
+import { URGENCY_CONFIG, STATUS_CONFIG, RECURRENCE_LABELS, loadCustomStatuses, buildAllStatuses } from '../constants';
 
 interface TaskModalProps {
   task: Task | null;
@@ -64,8 +64,11 @@ const TaskModal: React.FC<TaskModalProps> = ({
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    files.forEach(file => {
+    const fileList = e.target.files;
+    if (!fileList) return;
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList.item(i);
+      if (!file) continue;
       const reader = new FileReader();
       reader.onloadend = () => {
         const newAttachment: TaskAttachment = {
@@ -78,7 +81,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
         setAttachments(prev => [...prev, newAttachment]);
       };
       reader.readAsDataURL(file);
-    });
+    }
   };
 
   const removeAttachment = (id: string) => {
@@ -290,17 +293,26 @@ const TaskModal: React.FC<TaskModalProps> = ({
                   Status
                 </label>
                 <div className="grid grid-cols-2 gap-1.5">
-                  {STATUS_ORDER.map(s => {
-                    const cfg = STATUS_CONFIG[s];
+                  {buildAllStatuses(loadCustomStatuses()).map(({ id: s, cfg, isNative }) => {
+                    const customColor = (cfg as any).customColor as string | undefined;
                     return (
                       <button
                         key={s}
-                        onClick={() => setStatus(s)}
+                        onClick={() => setStatus(s as TaskStatus)}
                         className={`flex items-center px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
-                          status === s ? `${cfg.border} ${cfg.bg} ${cfg.text} shadow-sm` : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                          status === s
+                            ? isNative
+                              ? `${cfg.border} ${cfg.bg} ${cfg.text} shadow-sm`
+                              : 'border-2 shadow-sm bg-slate-50 text-slate-900'
+                            : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
                         }`}
+                        style={!isNative && status === s ? { borderColor: customColor } : undefined}
                       >
-                        <div className={`w-1.5 h-1.5 rounded-full ${cfg.color} mr-1.5`} />
+                        {isNative ? (
+                          <div className={`w-1.5 h-1.5 rounded-full ${cfg.color} mr-1.5`} />
+                        ) : (
+                          <div className="w-1.5 h-1.5 rounded-full mr-1.5" style={{ backgroundColor: customColor }} />
+                        )}
                         {cfg.label}
                       </button>
                     );

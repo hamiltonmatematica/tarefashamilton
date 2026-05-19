@@ -1,7 +1,7 @@
 import React from 'react';
 import { Circle, FileText, Image as ImageIcon, Calendar, CheckSquare, AlertCircle, Repeat } from 'lucide-react';
 import { Task, Category, Project, TaskStatus } from '../types';
-import { URGENCY_CONFIG, STATUS_CONFIG, isOverdue, formatPrettyDate, isToday } from '../constants';
+import { URGENCY_CONFIG, getStatusConfig, isOverdue, formatPrettyDate, isToday, loadCustomStatuses, isNativeStatus } from '../constants';
 
 interface TaskCardProps {
   task: Task;
@@ -15,7 +15,8 @@ interface TaskCardProps {
 
 const TaskCard: React.FC<TaskCardProps> = ({ task, category, project, onClick, onComplete, onChangeStatus, compact }) => {
   const urgencyStyle = URGENCY_CONFIG[task.urgency];
-  const statusStyle = STATUS_CONFIG[task.status || 'todo'];
+  const statusStyle = getStatusConfig(task.status, loadCustomStatuses());
+  const statusIsCustom = task.status && !isNativeStatus(task.status);
   const dueDate = task.dueDate || task.scheduledDate;
   const overdue = !task.isCompleted && isOverdue(dueDate);
   const dueToday = !task.isCompleted && isToday(dueDate);
@@ -70,9 +71,22 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, category, project, onClick, o
 
             {/* Status badge */}
             {task.status && task.status !== 'todo' && (
-              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${statusStyle.bg} ${statusStyle.text}`}>
-                {statusStyle.label}
-              </span>
+              statusIsCustom ? (
+                <span
+                  className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider"
+                  style={{
+                    backgroundColor: `${statusStyle.customColor}15`,
+                    color: statusStyle.customColor,
+                    border: `1px solid ${statusStyle.customColor}30`
+                  }}
+                >
+                  {statusStyle.label}
+                </span>
+              ) : (
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${statusStyle.bg} ${statusStyle.text}`}>
+                  {statusStyle.label}
+                </span>
+              )
             )}
 
             {task.recurrence && task.recurrence !== 'none' && (

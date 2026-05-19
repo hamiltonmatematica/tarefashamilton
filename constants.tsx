@@ -1,5 +1,5 @@
 
-import { Urgency, DayOfWeek, Category, TaskStatus, Recurrence } from './types';
+import { Urgency, DayOfWeek, Category, TaskStatus, NativeTaskStatus, Recurrence } from './types';
 
 export const URGENCY_CONFIG = {
   [Urgency.CRITICAL]: { label: 'Crítica', color: 'bg-red-500', text: 'text-red-700', border: 'border-red-500', bg: 'bg-red-50' },
@@ -8,15 +8,138 @@ export const URGENCY_CONFIG = {
   [Urgency.LOW]: { label: 'Baixa', color: 'bg-green-500', text: 'text-green-700', border: 'border-green-500', bg: 'bg-green-50' },
 };
 
-export const STATUS_CONFIG: Record<TaskStatus, { label: string; color: string; bg: string; text: string; border: string }> = {
-  backlog: { label: 'Backlog', color: 'bg-slate-400', bg: 'bg-slate-100', text: 'text-slate-700', border: 'border-slate-300' },
-  todo: { label: 'A Fazer', color: 'bg-blue-500', bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-300' },
-  doing: { label: 'Em Andamento', color: 'bg-amber-500', bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-300' },
-  blocked: { label: 'Bloqueada', color: 'bg-rose-500', bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-300' },
-  done: { label: 'Concluída', color: 'bg-emerald-500', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-300' },
+export interface StatusConfig {
+  label: string;
+  color: string;
+  bg: string;
+  text: string;
+  border: string;
+  description: string;
+  isNative?: boolean;
+}
+
+export const STATUS_CONFIG: Record<NativeTaskStatus, StatusConfig> = {
+  backlog: {
+    label: 'Backlog',
+    color: 'bg-slate-400',
+    bg: 'bg-slate-100',
+    text: 'text-slate-700',
+    border: 'border-slate-300',
+    description: 'Ideias e tarefas que ainda não entraram na fila imediata. Use para registrar tudo que veio à mente, sem comprometer com prazo.',
+    isNative: true,
+  },
+  todo: {
+    label: 'A Fazer',
+    color: 'bg-blue-500',
+    bg: 'bg-blue-50',
+    text: 'text-blue-700',
+    border: 'border-blue-300',
+    description: 'Pronta para começar, mas ainda não iniciada. Está na fila e tem o que precisa para ser executada.',
+    isNative: true,
+  },
+  doing: {
+    label: 'Em Andamento',
+    color: 'bg-amber-500',
+    bg: 'bg-amber-50',
+    text: 'text-amber-700',
+    border: 'border-amber-300',
+    description: 'Você está executando ativamente. Idealmente poucas tarefas aqui ao mesmo tempo (foco!).',
+    isNative: true,
+  },
+  blocked: {
+    label: 'Bloqueada',
+    color: 'bg-rose-500',
+    bg: 'bg-rose-50',
+    text: 'text-rose-700',
+    border: 'border-rose-300',
+    description: 'Travada esperando algo ou alguém externo (cliente, fornecedor, aprovação). Anote nas notas quem precisa ser cobrado.',
+    isNative: true,
+  },
+  done: {
+    label: 'Concluída',
+    color: 'bg-emerald-500',
+    bg: 'bg-emerald-50',
+    text: 'text-emerald-700',
+    border: 'border-emerald-300',
+    description: 'Finalizada. Vai para o histórico e é mantida por 30 dias.',
+    isNative: true,
+  },
 };
 
-export const STATUS_ORDER: TaskStatus[] = ['backlog', 'todo', 'doing', 'blocked', 'done'];
+export const NATIVE_STATUS_ORDER: NativeTaskStatus[] = ['backlog', 'todo', 'doing', 'blocked', 'done'];
+export const STATUS_ORDER: NativeTaskStatus[] = NATIVE_STATUS_ORDER;
+
+export function isNativeStatus(s: string | undefined): s is NativeTaskStatus {
+  return s === 'backlog' || s === 'todo' || s === 'doing' || s === 'blocked' || s === 'done';
+}
+
+export function getStatusConfig(s: TaskStatus | undefined, customStatuses: CustomStatus[]): StatusConfig & { customColor?: string } {
+  if (!s || isNativeStatus(s)) {
+    return STATUS_CONFIG[(s || 'todo') as NativeTaskStatus];
+  }
+  const custom = customStatuses.find(c => c.id === s);
+  if (!custom) return STATUS_CONFIG.todo;
+  return {
+    label: custom.label,
+    color: '',
+    bg: '',
+    text: '',
+    border: '',
+    description: custom.description || 'Status personalizado.',
+    isNative: false,
+    customColor: custom.color,
+  };
+}
+
+export interface CustomStatus {
+  id: string;
+  label: string;
+  color: string;
+  description?: string;
+  order: number;
+}
+
+export const CUSTOM_STATUSES_KEY = 'planner-hamilton-custom-statuses';
+
+export function loadCustomStatuses(): CustomStatus[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_STATUSES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomStatuses(list: CustomStatus[]) {
+  localStorage.setItem(CUSTOM_STATUSES_KEY, JSON.stringify(list));
+}
+
+export function buildAllStatuses(custom: CustomStatus[]): { id: string; cfg: StatusConfig; isNative: boolean }[] {
+  const native = NATIVE_STATUS_ORDER.map(s => ({ id: s, cfg: STATUS_CONFIG[s], isNative: true }));
+  // Inserir customizados antes de "done" para manter "concluída" sempre por último
+  const beforeDone = native.slice(0, -1);
+  const done = native[native.length - 1];
+
+  const customCfgs = [...custom]
+    .sort((a, b) => a.order - b.order)
+    .map(c => ({
+      id: c.id,
+      cfg: {
+        label: c.label,
+        color: '',
+        bg: '',
+        text: '',
+        border: '',
+        description: c.description || 'Status personalizado.',
+        isNative: false,
+        // dinâmico via inline style nos componentes
+        customColor: c.color,
+      } as StatusConfig & { customColor?: string },
+      isNative: false,
+    }));
+
+  return [...beforeDone, ...customCfgs, done];
+}
 
 export const RECURRENCE_LABELS: Record<Recurrence, string> = {
   none: 'Sem repetição',

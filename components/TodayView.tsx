@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { AlertCircle, Calendar, Inbox, CheckCircle2, Target, TrendingUp, Flame, Clock } from 'lucide-react';
 import { Task, Category, Project, TaskStatus } from '../types';
-import { URGENCY_CONFIG, STATUS_CONFIG, todayISO, isOverdue, parseLocalDate, formatPrettyDate } from '../constants';
+import { URGENCY_CONFIG, todayISO, isOverdue, parseLocalDate, formatPrettyDate } from '../constants';
 import TaskCard from './TaskCard';
 
 interface TodayViewProps {
