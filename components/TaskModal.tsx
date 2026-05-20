@@ -46,6 +46,19 @@ const TaskModal: React.FC<TaskModalProps> = ({
   const handleSave = () => {
     if (!title.trim()) return;
     const finalNotes = workNotes ? (notes ? `${notes}\n\n---\n${workNotes}` : workNotes) : notes;
+
+    // Captura texto pendente do input de subtarefa que ainda não virou item
+    let finalChecklist = checklist;
+    if (newChecklistText.trim()) {
+      finalChecklist = [...checklist, {
+        id: crypto.randomUUID(),
+        text: newChecklistText.trim(),
+        done: false,
+      }];
+      setChecklist(finalChecklist);
+      setNewChecklistText('');
+    }
+
     onSave({
       title: title.trim(),
       description,
@@ -58,7 +71,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
       dayOfWeek: scheduledDate ? 'monday' : 'inbox',
       notes: finalNotes,
       attachments,
-      checklist,
+      checklist: finalChecklist,
       recurrence,
     });
   };
@@ -198,7 +211,7 @@ const TaskModal: React.FC<TaskModalProps> = ({
               <div className="flex gap-2">
                 <input
                   type="text"
-                  placeholder="Adicionar subtarefa..."
+                  placeholder="Digite e pressione Enter para adicionar..."
                   value={newChecklistText}
                   onChange={e => setNewChecklistText(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addChecklistItem())}
@@ -207,11 +220,15 @@ const TaskModal: React.FC<TaskModalProps> = ({
                 <button
                   onClick={addChecklistItem}
                   disabled={!newChecklistText.trim()}
-                  className="px-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 text-white rounded-lg"
+                  className="px-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 text-white rounded-lg text-xs font-bold flex items-center gap-1"
                 >
                   <Plus className="w-4 h-4" />
+                  Adicionar
                 </button>
               </div>
+              <p className="text-[10px] text-slate-400 mt-1.5 italic">
+                💡 Cada subtarefa é confirmada pressionando <strong>Enter</strong> ou clicando em "Adicionar"
+              </p>
             </div>
 
             {/* Notas detalhadas */}
