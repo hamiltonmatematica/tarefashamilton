@@ -4,6 +4,36 @@ import { Task, Category, Project, TaskStatus, Recurrence, ChecklistItem } from '
 const STORAGE_KEY = 'planner-hamilton-tasks';
 const CATEGORIES_KEY = 'planner-hamilton-categories';
 const PROJECTS_KEY = 'planner-hamilton-projects';
+const TASK_META_KEY = 'planner-hamilton-task-meta';
+
+// Metadata local: sobrevive quando o Supabase ainda não tem as colunas V2 aplicadas.
+// Mapeamos por taskId → { status?, dueDate?, checklist?, recurrence? }
+type TaskMeta = Pick<Partial<Task>, 'status' | 'dueDate' | 'checklist' | 'recurrence'>;
+
+function loadTaskMetaMap(): Record<string, TaskMeta> {
+    try {
+        const raw = localStorage.getItem(TASK_META_KEY);
+        return raw ? JSON.parse(raw) : {};
+    } catch {
+        return {};
+    }
+}
+
+function saveTaskMetaMap(map: Record<string, TaskMeta>) {
+    localStorage.setItem(TASK_META_KEY, JSON.stringify(map));
+}
+
+function upsertTaskMeta(taskId: string, partial: TaskMeta) {
+    const map = loadTaskMetaMap();
+    map[taskId] = { ...(map[taskId] || {}), ...partial };
+    saveTaskMetaMap(map);
+}
+
+function removeTaskMeta(taskId: string) {
+    const map = loadTaskMetaMap();
+    delete map[taskId];
+    saveTaskMetaMap(map);
+}
 
 export async function getCurrentUserId(): Promise<string | null> {
     const user = await getCurrentUser();
@@ -47,7 +77,19 @@ export async function getTasks(): Promise<Task[]> {
             return [];
         }
 
-        return (data || []).map(rowToTask);
+        // Merge com metadata local (sobrescreve campos V2 quando Supabase não tem as colunas)
+        const metaMap = loadTaskMetaMap();
+        return (data || []).map(row => {
+            const task = rowToTask(row);
+            const meta = metaMap[task.id];
+            if (meta) {
+                if (meta.status !== undefined) task.status = meta.status;
+                if (meta.dueDate !== undefined) task.dueDate = meta.dueDate;
+                if (meta.checklist !== undefined) task.checklist = meta.checklist;
+                if (meta.recurrence !== undefined) task.recurrence = meta.recurrence;
+            }
+            return task;
+        });
     } else {
         const stored = localStorage.getItem(STORAGE_KEY);
         const parsed: Task[] = stored ? JSON.parse(stored) : [];
@@ -92,6 +134,7 @@ export async function addTask(task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>
             .select()
             .single();
 
+        let fellBackToMeta = false;
         // Fallback caso colunas novas ainda não existam no banco
         if (error && /status|checklist|recurrence|due_date/i.test(error.message || '')) {
             delete payload.status;
@@ -101,11 +144,30 @@ export async function addTask(task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>
             const retry = await supabase.from('tasks').insert([payload]).select().single();
             data = retry.data;
             error = retry.error;
+            fellBackToMeta = true;
         }
 
         if (error) throw error;
 
-        return rowToTask(data);
+        const created = rowToTask(data);
+
+        // Aplica os campos V2 no objeto retornado (otimismo) e salva em metadata local
+        // para que sobreviva ao refresh quando o Supabase ainda não tem as colunas.
+        created.status = task.status || 'todo';
+        created.checklist = task.checklist || [];
+        created.recurrence = task.recurrence || 'none';
+        created.dueDate = task.dueDate;
+
+        if (fellBackToMeta) {
+            upsertTaskMeta(created.id, {
+                status: created.status,
+                dueDate: created.dueDate,
+                checklist: created.checklist,
+                recurrence: created.recurrence,
+            });
+        }
+
+        return created;
     } else {
         const newTask: Task = {
             id: crypto.randomUUID(),
@@ -151,6 +213,7 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<Ta
             .select()
             .single();
 
+        let fellBackToMeta = false;
         if (error && /status|checklist|recurrence|due_date/i.test(error.message || '')) {
             delete dbUpdates.status;
             delete dbUpdates.checklist;
@@ -159,6 +222,7 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<Ta
             const retry = await supabase.from('tasks').update(dbUpdates).eq('id', id).select().single();
             data = retry.data;
             error = retry.error;
+            fellBackToMeta = true;
         }
 
         if (error) {
@@ -166,7 +230,22 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<Ta
             return null;
         }
 
-        return data ? rowToTask(data) : null;
+        if (!data) return null;
+        const updated = rowToTask(data);
+
+        // Aplica os campos V2 atualizados no objeto retornado e persiste em meta local
+        // quando o Supabase ainda não tem as colunas.
+        const v2Patch: Partial<Task> = {};
+        if (updates.status !== undefined) { updated.status = updates.status; v2Patch.status = updates.status; }
+        if (updates.dueDate !== undefined) { updated.dueDate = updates.dueDate; v2Patch.dueDate = updates.dueDate; }
+        if (updates.checklist !== undefined) { updated.checklist = updates.checklist; v2Patch.checklist = updates.checklist; }
+        if (updates.recurrence !== undefined) { updated.recurrence = updates.recurrence; v2Patch.recurrence = updates.recurrence; }
+
+        if (fellBackToMeta && Object.keys(v2Patch).length > 0) {
+            upsertTaskMeta(id, v2Patch);
+        }
+
+        return updated;
     } else {
         const tasks = await getTasks();
         const taskIndex = tasks.findIndex((t) => t.id === id);
@@ -189,6 +268,7 @@ export async function deleteTask(id: string): Promise<boolean> {
             .delete()
             .eq('id', id);
 
+        if (!error) removeTaskMeta(id);
         return !error;
     } else {
         const tasks = await getTasks();
